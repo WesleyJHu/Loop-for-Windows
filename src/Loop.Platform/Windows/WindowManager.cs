@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 using Loop.Core.Actions;
+using Loop.Core.Animation;
 using Loop.Core.Geometry;
 using Loop.Core.Windows;
 using static Loop.Platform.Interop.NativeMethods;
@@ -19,11 +20,29 @@ public sealed class WindowManager
 
     private readonly GesturePlanner _planner;
     private readonly IReadOnlyList<string> _excludedApps;
+    private readonly AnimationOptions _animation;
+    private readonly Func<bool> _systemAnimations;
+    private readonly SynchronizationContext? _ui;
+    private readonly WindowAnimator _animator = new();
+    private Animating? _animating;
+    private int _animationGeneration;
 
-    public WindowManager(LayoutSession? session = null, IReadOnlyList<string>? excludedApps = null)
+    /// <summary>A window gliding towards its target; its final placement is still to do.</summary>
+    private sealed record Animating(IntPtr Window, PlannedAction Planned, int Generation);
+
+    /// <param name="session">Layout state (cycle sizes, gap).</param>
+    /// <param name="excludedApps">Process names never to move.</param>
+    /// <param name="animation">Window-move animation settings (default: none).</param>
+    /// <param name="systemAnimations">Whether Windows' animation effects are on (default: <see cref="SystemAnimations.Enabled"/>).</param>
+    /// <remarks>Create on the UI thread: animations finish there, via its SynchronizationContext.</remarks>
+    public WindowManager(LayoutSession? session = null, IReadOnlyList<string>? excludedApps = null,
+        AnimationOptions? animation = null, Func<bool>? systemAnimations = null)
     {
         _planner = new GesturePlanner(session ?? new LayoutSession());
         _excludedApps = excludedApps ?? Array.Empty<string>();
+        _animation = animation ?? AnimationOptions.None;
+        _systemAnimations = systemAnimations ?? (() => SystemAnimations.Enabled);
+        _ui = SynchronizationContext.Current;
     }
 
     public bool IsPreviewing => _planner.IsActive;
@@ -34,7 +53,11 @@ public sealed class WindowManager
     /// </summary>
     public PlannedAction? Preview(WindowAction action, bool newGesture)
     {
-        if (!_planner.IsActive && !TryBegin()) return null;
+        if (!_planner.IsActive)
+        {
+            FinishAnimation(); // measure the window where it is going, not mid-glide
+            if (!TryBegin()) return null;
+        }
         return _planner.Step(action, newGesture);
     }
 
@@ -43,6 +66,7 @@ public sealed class WindowManager
     {
         var window = _planner.Window;
         if (_planner.Finish() is not { } planned) return false;
+        FinishAnimation();
         return Apply(window, planned);
     }
 
@@ -52,9 +76,42 @@ public sealed class WindowManager
     public bool ApplyNow(WindowAction action, bool newGesture)
     {
         _planner.Cancel();
+        FinishAnimation(); // a new key press during a glide jumps it to its end first
         if (!TryBegin()) return false;
         _planner.Step(action, newGesture);
         return CommitPreview();
+    }
+
+    /// <summary>Ends a glide in progress by placing the window at its target now.</summary>
+    public void FinishAnimation()
+    {
+        if (_animating is not { } a) return;
+        _animating = null;
+        _animator.Stop();
+        Landed(a.Window, a.Planned, IsWindow(a.Window) && Place(a.Window, a.Planned.Target, a.Planned.Display) is not null);
+    }
+
+    /// <summary>Starts gliding the window to a planned move, if animating makes sense for it.</summary>
+    private bool TryStartAnimation(IntPtr window, PlannedAction planned, bool wasMaximizedOrMinimized)
+    {
+        if (_ui is null || !TryMeasure(window, out var windowRect, out var visible)) return false;
+        var displays = MonitorService.GetDisplays();
+        if (displays.Count == 0) return false;
+        var from = displays[Math.Max(0, DisplayOrder.IndexOf(displays, visible))];
+
+        if (!MotionPolicy.ShouldAnimateWindow(_animation, _systemAnimations(), planned.Kind, visible, planned.Target,
+                from, planned.Display, wasMaximizedOrMinimized))
+            return false;
+
+        var generation = ++_animationGeneration;
+        _animating = new Animating(window, planned, generation);
+        var ui = _ui;
+        _animator.Run(window, visible, planned.Target, windowRect, MotionPolicy.FrameBounds(from, planned.Display), _animation,
+            framesDone: () => ui.Post(_ =>
+            {
+                if (_animating?.Generation == generation) FinishAnimation();
+            }, null));
+        return true;
     }
 
     private bool TryBegin()
@@ -108,17 +165,23 @@ public sealed class WindowManager
                 // Move, or "maximize" for windows without a maximize button (fixed-size dialogs):
                 // those just fill the work area, since a real maximize would strand their content.
                 // A maximized (or minimized) window ignores SetWindowPos sizing until restored.
-                if (IsZoomed(window) || IsIconic(window))
-                    ShowWindow(window, SW_RESTORE);
+                var wasMaximizedOrMinimized = IsZoomed(window) || IsIconic(window);
+                if (wasMaximizedOrMinimized) ShowWindow(window, SW_RESTORE);
+                if (TryStartAnimation(window, planned, wasMaximizedOrMinimized)) return true; // lands later
                 ok = Place(window, planned.Target, planned.Display) is not null;
                 break;
         }
 
+        Landed(window, planned, ok);
+        return ok;
+    }
+
+    private void Landed(IntPtr window, PlannedAction planned, bool ok)
+    {
         Rect? landed = ok && TryMeasure(window, out _, out var r) ? r : null;
         if (landed is { } l) _planner.ReportLanded(window, planned, l);
         RememberInsets(window); // only records when the window ended up not maximized
         Log.Write($"{planned.Action} {planned.Kind} plan={planned.Plan} display={planned.Display.WorkArea} landed={landed}");
-        return ok;
     }
 
     /// <summary>

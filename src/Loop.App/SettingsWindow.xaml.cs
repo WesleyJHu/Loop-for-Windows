@@ -9,6 +9,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using Loop.Core.Actions;
+using Loop.Core.Animation;
 using Loop.Core.Input;
 using Loop.Core.Settings;
 using ModifierKeys = Loop.Core.Input.ModifierKeys;
@@ -48,6 +49,14 @@ public partial class SettingsWindow : Window
         ChordGrace.Text = s.ChordGraceMs.ToString(CultureInfo.InvariantCulture);
         PreviewColor.Text = s.PreviewColor;
 
+        AnimateWindows.IsChecked = s.AnimateWindows;
+        AnimatePreview.IsChecked = s.AnimatePreview;
+        ShowIndicator.IsChecked = s.ShowIndicator;
+        AnimationDuration.Text = s.AnimationDurationMs.ToString(CultureInfo.InvariantCulture);
+        AnimationEasing.ItemsSource = EasingChoices;
+        AnimationEasing.DisplayMemberPath = nameof(EasingChoice.Label);
+        AnimationEasing.SelectedItem = EasingChoices.FirstOrDefault(c => c.Kind == s.AnimationEasing) ?? EasingChoices[0];
+
         StopRecording();
         _rows.Clear();
         foreach (var direction in new[] { Direction.Left, Direction.Right, Direction.Up, Direction.Down })
@@ -80,6 +89,14 @@ public partial class SettingsWindow : Window
         else errors.Add("Gap must be a whole number of pixels.");
         if (int.TryParse(ChordGrace.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var grace)) s.ChordGraceMs = grace;
         else errors.Add("Chord window must be a whole number of milliseconds.");
+
+        s.AnimateWindows = AnimateWindows.IsChecked == true;
+        s.AnimatePreview = AnimatePreview.IsChecked == true;
+        s.ShowIndicator = ShowIndicator.IsChecked == true;
+        s.AnimationEasing = (AnimationEasing.SelectedItem as EasingChoice)?.Kind ?? EasingKind.EaseOut;
+        if (int.TryParse(AnimationDuration.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var duration))
+            s.AnimationDurationMs = duration;
+        else errors.Add("Animation duration must be a whole number of milliseconds.");
 
         s.DirectionKeys = _rows.Where(r => r.Direction is not null).ToDictionary(r => r.Direction!.Value, r => r.KeyName);
         s.ActionKeys = _rows.Where(r => r.Action is not null && r.KeyName.Length > 0).ToDictionary(r => r.Action!.Value, r => r.KeyName);
@@ -201,6 +218,15 @@ public partial class SettingsWindow : Window
         OnAddExcluded(sender, e);
         e.Handled = true;
     }
+
+    public sealed record EasingChoice(EasingKind Kind, string Label);
+
+    private static readonly EasingChoice[] EasingChoices =
+    {
+        new(EasingKind.EaseOut, "Ease out (snappy)"),
+        new(EasingKind.EaseInOut, "Ease in and out (smooth)"),
+        new(EasingKind.Linear, "Linear"),
+    };
 
     /// <summary>One row of the key list: a direction or an action, and the key bound to it.</summary>
     public sealed class BindingRow : INotifyPropertyChanged

@@ -14,6 +14,7 @@ public partial class App : Application
     private Mutex? _singleInstance;
     private LoopService? _loop;
     private PreviewOverlay? _overlay;
+    private DirectionIndicator? _indicator;
     private TrayIcon? _tray;
     private SettingsWindow? _settingsWindow;
     private string _settingsPath = SettingsStore.DefaultPath;
@@ -38,7 +39,11 @@ public partial class App : Application
         try
         {
             _overlay = new PreviewOverlay(settings.PreviewColor);
-            _loop = new LoopService(settings, _overlay);
+            _indicator = new DirectionIndicator(settings.PreviewColor);
+            _overlay.Prewarm();
+            _indicator.Prewarm();
+            ApplyVisualSettings(settings);
+            _loop = new LoopService(settings, _overlay, _indicator);
             _loop.Start();
         }
         catch (Exception ex)
@@ -81,8 +86,17 @@ public partial class App : Application
             StartupRegistration.SetEnabled(launchAtStartup, exe);
 
         _loop!.ApplySettings(settings);
-        _overlay!.SetColor(settings.PreviewColor);
+        ApplyVisualSettings(settings);
         _tray!.SetTrigger(settings.Trigger);
+    }
+
+    private void ApplyVisualSettings(LoopSettings settings)
+    {
+        var animation = settings.ToAnimationOptions();
+        _overlay!.SetColor(settings.PreviewColor);
+        _overlay.SetAnimation(animation);
+        _indicator!.SetColor(settings.PreviewColor);
+        _indicator.SetAnimation(animation);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -90,6 +104,7 @@ public partial class App : Application
         _tray?.Dispose();
         _loop?.Dispose();
         _overlay?.Close();
+        _indicator?.Close();
         _singleInstance?.Dispose();
         base.OnExit(e);
     }

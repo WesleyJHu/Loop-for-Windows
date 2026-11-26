@@ -2,8 +2,11 @@ using Loop.Core.Actions;
 
 namespace Loop.Core.Geometry;
 
-/// <summary>A connected display, in physical pixels. <see cref="Id"/> is the platform's monitor handle.</summary>
-public readonly record struct DisplayArea(nint Id, Rect Bounds, Rect WorkArea);
+/// <summary>
+/// A connected display, in physical pixels. <see cref="Id"/> is the platform's monitor handle;
+/// <see cref="Dpi"/> its effective DPI (96 = 100% scale).
+/// </summary>
+public readonly record struct DisplayArea(nint Id, Rect Bounds, Rect WorkArea, int Dpi = 96);
 
 /// <summary>Numbering of displays for "next display" and "display N" actions.</summary>
 public static class DisplayOrder

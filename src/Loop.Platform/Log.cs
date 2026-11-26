@@ -4,7 +4,7 @@ namespace Loop.Platform;
 /// Minimal diagnostics. Always writes to the debugger; also appends to the file named by the
 /// LOOP_LOG environment variable when it is set. Never log key presses: only actions and geometry.
 /// </summary>
-internal static class Log
+public static class Log
 {
     private static readonly string? FilePath = Environment.GetEnvironmentVariable("LOOP_LOG");
     private static readonly object Gate = new();

@@ -1,5 +1,6 @@
 using System.Globalization;
 using Loop.Core.Actions;
+using Loop.Core.Animation;
 using Loop.Core.Input;
 
 namespace Loop.Core.Settings;
@@ -50,6 +51,26 @@ public sealed class LoopSettings
     /// <summary>Process names (e.g. "notepad" or "notepad.exe") whose windows Loop never moves.</summary>
     public List<string> ExcludedApps { get; set; } = new();
 
+    /// <summary>Fade the preview in and out and glide it between targets.</summary>
+    public bool AnimatePreview { get; set; } = true;
+
+    /// <summary>Glide windows into place instead of jumping (skipped when it would stutter).</summary>
+    public bool AnimateWindows { get; set; } = true;
+
+    /// <summary>How long a glide takes. 0 turns all animation off.</summary>
+    public int AnimationDurationMs { get; set; } = 180;
+
+    public EasingKind AnimationEasing { get; set; } = EasingKind.EaseOut;
+
+    /// <summary>Show a radial direction indicator near the cursor while the trigger is held.</summary>
+    public bool ShowIndicator { get; set; }
+
+    public const int MaxAnimationDurationMs = 1000;
+
+    /// <summary>The animation settings as options (call on validated settings).</summary>
+    public AnimationOptions ToAnimationOptions() =>
+        new(AnimatePreview, AnimateWindows, TimeSpan.FromMilliseconds(AnimationDurationMs), AnimationEasing);
+
     public static LoopSettings CreateDefault() => new();
 
     private static Dictionary<WindowAction, string> DefaultActionKeys()
@@ -78,6 +99,11 @@ public sealed class LoopSettings
         DirectionKeys = new Dictionary<Direction, string>(DirectionKeys),
         ActionKeys = new Dictionary<WindowAction, string>(ActionKeys),
         ExcludedApps = new List<string>(ExcludedApps),
+        AnimatePreview = AnimatePreview,
+        AnimateWindows = AnimateWindows,
+        AnimationDurationMs = AnimationDurationMs,
+        AnimationEasing = AnimationEasing,
+        ShowIndicator = ShowIndicator,
     };
 
     /// <summary>Every problem with these settings, as user-facing messages. Empty when valid.</summary>
@@ -94,6 +120,9 @@ public sealed class LoopSettings
         if (!TryParseColor(PreviewColor, out _)) errors.Add($"Preview color \"{PreviewColor}\" is not a #RRGGBB color.");
         if (ChordGraceMs is < 0 or > MaxChordGraceMs) errors.Add($"Chord grace period must be 0–{MaxChordGraceMs} ms.");
         if (Gap is < 0 or > MaxGap) errors.Add($"Gap must be 0–{MaxGap} px.");
+        if (AnimationDurationMs is < 0 or > MaxAnimationDurationMs)
+            errors.Add($"Animation duration must be 0–{MaxAnimationDurationMs} ms.");
+        if (!Enum.IsDefined(AnimationEasing)) errors.Add("Unknown animation easing.");
 
         if (CycleSizes is null || CycleSizes.Count is 0 or > MaxCycleSizes)
             errors.Add($"Enter 1–{MaxCycleSizes} cycle sizes.");

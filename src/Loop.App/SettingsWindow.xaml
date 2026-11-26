@@ -123,6 +123,34 @@
                     </StackPanel>
                 </GroupBox>
 
+                <GroupBox Header="Animation">
+                    <StackPanel>
+                        <CheckBox x:Name="AnimateWindows" Content="Glide windows into place" />
+                        <CheckBox x:Name="AnimatePreview" Content="Animate the preview (fade and glide)" />
+                        <CheckBox x:Name="ShowIndicator" Content="Show a direction indicator at the cursor while the trigger is held" />
+                        <Grid Margin="0,8,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Duration (ms)" Style="{StaticResource Label}" />
+                            <TextBox x:Name="AnimationDuration" Grid.Column="1" Margin="0,3" />
+                            <TextBlock Grid.Column="2" Style="{StaticResource Hint}" Margin="10,0,0,0"
+                                       VerticalAlignment="Center" Text="0 turns animation off" />
+                            <TextBlock Grid.Row="1" Text="Easing" Style="{StaticResource Label}" />
+                            <ComboBox x:Name="AnimationEasing" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="2"
+                                      Margin="0,3" HorizontalAlignment="Left" MinWidth="180" />
+                        </Grid>
+                        <TextBlock Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                   Text="Loop doesn't animate when Windows' Animation effects setting is off, for maximize, restore and minimize (Windows animates those), between displays with different scaling, or for apps that redraw too slowly to keep up." />
+                    </StackPanel>
+                </GroupBox>
+
                 <GroupBox Header="Keys">
                     <StackPanel>
                         <TextBlock Style="{StaticResource Hint}"

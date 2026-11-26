@@ -51,6 +51,12 @@ public static class LoopSmoke {
   // Rects are [left, top, width, height] in physical pixels.
   public static int[] Frame(IntPtr h) { RECT r; DwmGetWindowAttribute(h, 9, out r, 16); return R(r); }
   public static int[] Outer(IntPtr h) { RECT r; GetWindowRect(h, out r); return R(r); }
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern IntPtr GetProp(IntPtr h, string name);
+  // The rectangle the preview overlay is drawing (it publishes it as window properties).
+  public static int[] Preview(IntPtr h) {
+    return new[] { (int)GetProp(h, "Loop.Preview.Left"), (int)GetProp(h, "Loop.Preview.Top"),
+                   (int)GetProp(h, "Loop.Preview.Width"), (int)GetProp(h, "Loop.Preview.Height") };
+  }
   public static int[] Work(IntPtr h) {
     var mi = new MONITORINFO(); mi.cb = Marshal.SizeOf(typeof(MONITORINFO));
     GetMonitorInfo(MonitorFromWindow(h, 2), ref mi); return R(mi.work);
@@ -147,7 +153,17 @@ try {
     }
 
     function Hold-Trigger { foreach ($m in 0xA2, 0x5B, 0xA4) { [LoopSmoke]::Key($m, $false) } }   # LCtrl, LWin, LAlt
-    function Release-Trigger { foreach ($m in 0xA4, 0x5B, 0xA2) { [LoopSmoke]::Key($m, $true) }; Start-Sleep -Milliseconds 350 }
+    function Release-Modifiers { foreach ($m in 0xA4, 0x5B, 0xA2) { [LoopSmoke]::Key($m, $true) } }
+    # Waits long enough for the (default 180 ms) glide and the final placement.
+    function Release-Trigger { Release-Modifiers; Start-Sleep -Milliseconds 500 }
+
+    # Samples a rect every ~10 ms for a while (e.g. to watch a glide).
+    function Sample([scriptblock]$read, [int]$ms) {
+        $samples = New-Object System.Collections.Generic.List[object]
+        $clock = [Diagnostics.Stopwatch]::StartNew()
+        while ($clock.ElapsedMilliseconds -lt $ms) { $samples.Add((& $read)); Start-Sleep -Milliseconds 10 }
+        , $samples
+    }
     function Tap([int[]]$keys) {
         foreach ($k in $keys) { [LoopSmoke]::Key($k, $false); Start-Sleep -Milliseconds 15 }
         Start-Sleep -Milliseconds 150   # longer than Loop's chord grace period
@@ -216,7 +232,7 @@ try {
     Start-Sleep -Milliseconds 150
     Check 'holding: window stays put' $before
     Check-True 'holding: preview visible' (Overlay-Visible)
-    if (Overlay-Visible) { Check 'holding: preview over target' (Inset (Expect-Layout 'RightHalf' $work)) ([LoopSmoke]::Outer((Get-Overlay))) }
+    if (Overlay-Visible) { Check 'holding: preview over target' (Inset (Expect-Layout 'RightHalf' $work)) ([LoopSmoke]::Preview((Get-Overlay))) }
     Release-Trigger
     Check 'release: window moves' (Expect-Layout 'RightHalf' $work)
     Check-True 'release: preview hidden' (-not (Overlay-Visible))
@@ -331,9 +347,62 @@ try {
     Check-True 'M (minimize)' ([LoopSmoke]::IsIconic($h))
     [LoopSmoke]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 300
 
+    # ============================ Animation ======================================================
+    Start-Loop @{}
+    Write-Host "[default settings: animations on]"
+    Send-Chord @($VK.Left)
+    Focus-Target; Hold-Trigger; Tap @($VK.Right); Release-Modifiers
+    $frames = Sample { [LoopSmoke]::Frame($h) } 450
+    $between = @($frames | Where-Object { $_[0] -gt 0 -and $_[0] -lt 960 })
+    Check-True 'glide: passes through in-between positions' ($between.Count -ge 2) "$($between.Count) of $($frames.Count) samples in between"
+    Check 'glide: lands exactly' (Expect-Layout 'RightHalf' $work)
+    $lefts = @($frames | ForEach-Object { $_[0] })
+    $monotonic = $true
+    for ($i = 1; $i -lt $lefts.Count; $i++) { if ($lefts[$i] -lt $lefts[$i - 1]) { $monotonic = $false } }
+    Check-True 'glide: moves one way, no jumps back' $monotonic
+
+    # Preview glides between targets while the trigger is held: Left, then Up with Left still held.
+    Focus-Target; Hold-Trigger
+    [LoopSmoke]::Key($VK.Left, $false)
+    Start-Sleep -Milliseconds 300
+    [LoopSmoke]::Key($VK.Up, $false)
+    $overlays = Sample { [LoopSmoke]::Preview((Get-Overlay)) } 350
+    [LoopSmoke]::Key($VK.Up, $true); [LoopSmoke]::Key($VK.Left, $true)
+    $endOverlay = Inset (Expect-Layout 'TopLeft' $work)
+    $startOverlay = Inset (Expect-Layout 'LeftHalf' $work)
+    $mid = @($overlays | Where-Object { $_[3] -lt $startOverlay[3] -and $_[3] -gt $endOverlay[3] })
+    Check-True 'preview glides (Left -> Up+Left)' ($mid.Count -ge 2) "$($mid.Count) in-between heights"
+    Check 'preview ends over the corner' $endOverlay ([LoopSmoke]::Preview((Get-Overlay)))
+    Release-Trigger
+    Check 'after preview glide: window at corner' (Expect-Layout 'TopLeft' $work)
+
+    # A new key press during a glide jumps it to its end, then continues from there.
+    Start-Loop @{ ApplyMode = 'Instant' }
+    Write-Host "[settings: instant, animations on]"
+    Send-Chord @($VK.Right)
+    Focus-Target; Hold-Trigger
+    [LoopSmoke]::Key($VK.Left, $false); [LoopSmoke]::Key($VK.Left, $true)
+    Start-Sleep -Milliseconds 140    # chord grace (60) + part of the glide
+    [LoopSmoke]::Key($VK.Down, $false); [LoopSmoke]::Key($VK.Down, $true)
+    Release-Trigger
+    Check 'interrupted glide: lands on the newer target' (Expect-Layout 'BottomHalf' $work)
+    Send-Chord @($VK.Left)
+    Check 'after interruption: layouts still exact' (Expect-Layout 'LeftHalf' $work)
+
+    # Direction indicator.
+    Start-Loop @{ ShowIndicator = $true }
+    Write-Host "[settings: direction indicator on]"
+    Focus-Target; Hold-Trigger; Tap @($VK.Up, $VK.Right)
+    $ind = [LoopSmoke]::FindWindow([NullString]::Value, 'Loop indicator')
+    Check-True 'indicator: visible while holding' (($ind -ne [IntPtr]::Zero) -and [LoopSmoke]::IsWindowVisible($ind))
+    Release-Trigger
+    Check-True 'indicator: hidden after release' (-not [LoopSmoke]::IsWindowVisible($ind))
+    Check 'indicator: window still moved' (Expect-Layout 'TopRight' $work)
+
     # ============================ Instant mode + gaps (settings file) =============================
-    Start-Loop @{ ApplyMode = 'Instant'; Gap = 10 }
-    Write-Host "[settings: instant, gap 10]"
+    # Window animation off here: checks the off switch, and lets us check positions mid-hold.
+    Start-Loop @{ ApplyMode = 'Instant'; Gap = 10; AnimateWindows = $false }
+    Write-Host "[settings: instant, gap 10, no window animation]"
     Focus-Target; Hold-Trigger; Tap @($VK.Left)
     Check 'instant: moves while holding, with gap' (With-Gap (Expect-Layout 'LeftHalf' $work) $work 10)
     Check-True 'instant: no preview' (-not (Overlay-Visible))

@@ -18,7 +18,10 @@ public static class MonitorService
         {
             var info = new MONITORINFO { cbSize = Marshal.SizeOf<MONITORINFO>() };
             if (GetMonitorInfo(handle, ref info))
-                displays.Add(new DisplayArea(handle, ToRect(info.rcMonitor), ToRect(info.rcWork)));
+            {
+                var dpi = GetDpiForMonitor(handle, MDT_EFFECTIVE_DPI, out var x, out _) == 0 ? (int)x : 96;
+                displays.Add(new DisplayArea(handle, ToRect(info.rcMonitor), ToRect(info.rcWork), dpi));
+            }
             return true;
         }, IntPtr.Zero);
         return DisplayOrder.Sort(displays, d => d.Bounds);

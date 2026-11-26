@@ -41,6 +41,14 @@ the app shows its restore icon and remembers its previous size. Arrow layouts on
 from that previous size (← + → centers it at the size it had). Windows without a maximize button, such
 as fixed-size dialogs, are stretched to fill the screen instead. Gaps don't apply to maximized windows.
 
+**Animation.** Windows glide into place (about 180 ms, easing out), and the preview fades in and out
+and glides between targets as you cycle sizes or build a chord. A new key press during a glide jumps it
+to its end first. Loop skips the glide when it would look worse than a jump: when Windows' *Animation
+effects* setting is off, for maximize/restore/minimize (Windows animates those itself), when a window
+first has to come out of maximized or minimized, between displays with different scaling (the window
+would rescale mid-flight), and for apps that repaint too slowly to keep up. Optionally, a ring at the
+cursor lights up the direction you've chosen, like macOS Loop's radial menu.
+
 Without the trigger, every key behaves normally.
 
 ## Settings
@@ -52,6 +60,7 @@ Right-click the tray icon and choose **Settings…** (or double-click the icon).
 - **cycle sizes** (e.g. `1/2, 1/3, 2/3`), the **gap** between windows, and the **chord window**
 - the key for **every action**: click it and press the new key (the window has an action for each half,
   corner, display, and so on, not just the defaults above)
+- **animation**: window glides and preview animation on/off, duration, easing, and the direction indicator
 - **excluded apps**, by process name (e.g. `notepad`)
 - **start at sign-in** (per-user Run key; no admin rights)
 
@@ -77,11 +86,17 @@ Environment variables:
 
 | Project | Purpose |
 |---|---|
-| `src/Loop.Core` | Pure logic: key state machine, chords, layout math and gaps, size cycling, gesture and preview planning, display ordering, placement planning, settings and their JSON format. No Win32. |
-| `src/Loop.Platform` | Win32 interop: low-level keyboard hook, input injection, window and monitor APIs, startup registration, and the service that wires them together. |
-| `src/Loop.App` | WPF app: tray icon, preview overlay, settings window, single instance, Per-Monitor V2 DPI manifest. |
+| `src/Loop.Core` | Pure logic: key state machine, chords, layout math and gaps, size cycling, gesture and preview planning, display ordering, placement planning, easing and animation policy, settings and their JSON format. No Win32. |
+| `src/Loop.Platform` | Win32 interop: low-level keyboard hook (on its own thread), input injection, window and monitor APIs, the window animator, startup registration, and the service that wires them together. |
+| `src/Loop.App` | WPF app: tray icon, preview overlay, direction indicator, settings window, single instance, Per-Monitor V2 DPI manifest. |
 | `tests/Loop.Core.Tests` | xUnit tests for everything in Core. |
 | `tests/smoke` | End-to-end smoke test using SendInput against a throwaway DPI-unaware window. |
+
+**Threads.** The keyboard hook has a dedicated thread that only pumps messages and decides what each
+key means. Windows skips a low-level hook that doesn't answer quickly and passes the key through, so the
+hook must never wait behind UI work (rendering the preview, finishing an animation, a slow app's
+`SetWindowPos`). Window moves and visuals run on the UI thread; animation frames run on a background
+thread. With `LOOP_LOG` set, Loop logs whenever UI work waits more than 50 ms or takes more than 30 ms.
 
 ## Notes on mixed-DPI setups
 
@@ -105,16 +120,6 @@ on common resolutions.
 - [x] **Phase 3**: multi-monitor (next/previous/numbered display, layout-preserving moves, mixed DPI, hotplug)
 - [x] **Phase 4**: hold-to-preview overlay, apply on trigger release, Esc to cancel
 - [x] **Phase 5**: settings UI (trigger, bindings, apply mode, preview, cycle sizes, gaps, exclusions, start at sign-in)
-- [ ] **Phase 6: smooth transitions and animations**
-  - *Preview overlay:* fade in and out (~100 ms); glide between targets with an ease-out curve
-    (~150 ms) instead of jumping, so cycling and chords read as one motion.
-  - *Window moves:* optionally animate the real window from its current rect to the target over
-    ~150–200 ms, one `SetWindowPos` per display frame (paced with `DwmFlush`), with the final frame
-    going through the normal placement path so mixed-DPI handling and border correction still apply.
-  - *Restraint:* skip the animation when the window repaints too slowly to keep up (measured on the
-    first frames), for very large moves across displays with different DPI, and when Windows'
-    *Animation effects* setting is off (`SPI_GETCLIENTAREAANIMATION`); a new key press during an
-    animation jumps straight to its end.
-  - *Indicator:* an optional radial direction indicator near the cursor, like macOS Loop.
-  - *Settings:* animation on/off, duration, and easing.
+- [x] **Phase 6**: smooth transitions and animations (window glides, preview fades and glides,
+  direction indicator, animation settings; keyboard hook moved to its own thread)
 - [ ] **Phase 7**: elevated mode, restore previous size, installer
