@@ -53,6 +53,10 @@ public partial class SettingsWindow : Window
         AnimateWindows.IsChecked = s.AnimateWindows;
         AnimatePreview.IsChecked = s.AnimatePreview;
         ShowIndicator.IsChecked = s.ShowIndicator;
+        MouseTrigger.ItemsSource = MouseTriggerChoices;
+        MouseTrigger.DisplayMemberPath = nameof(MouseTriggerChoice.Label);
+        MouseTrigger.SelectedItem = MouseTriggerChoices.FirstOrDefault(c => c.Trigger == s.MouseTrigger) ?? MouseTriggerChoices[0];
+        MouseDoubleClickSpeed.Text = s.MouseDoubleClickMs.ToString(CultureInfo.InvariantCulture);
         RunAsAdministrator.IsChecked = s.RunAsAdministrator;
         AnimationDuration.Text = s.AnimationDurationMs.ToString(CultureInfo.InvariantCulture);
         AnimationEasing.ItemsSource = EasingChoices;
@@ -95,6 +99,10 @@ public partial class SettingsWindow : Window
         s.AnimateWindows = AnimateWindows.IsChecked == true;
         s.AnimatePreview = AnimatePreview.IsChecked == true;
         s.ShowIndicator = ShowIndicator.IsChecked == true;
+        s.MouseTrigger = (MouseTrigger.SelectedItem as MouseTriggerChoice)?.Trigger ?? Loop.Core.Input.MouseTrigger.Off;
+        if (int.TryParse(MouseDoubleClickSpeed.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var doubleClick))
+            s.MouseDoubleClickMs = doubleClick;
+        else errors.Add("Double-click speed must be a whole number of milliseconds.");
         s.RunAsAdministrator = RunAsAdministrator.IsChecked == true;
         s.AnimationEasing = (AnimationEasing.SelectedItem as EasingChoice)?.Kind ?? EasingKind.EaseOut;
         if (int.TryParse(AnimationDuration.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var duration))
@@ -130,6 +138,15 @@ public partial class SettingsWindow : Window
     }
 
     private void OnCancel(object sender, RoutedEventArgs e) => Close();
+
+    /// <summary>The double-click speed only matters for the middle-button trigger.</summary>
+    private void OnMouseTriggerChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (MouseDoubleClickSpeed is null || MouseTriggerNote is null) return;
+        var middle = (MouseTrigger.SelectedItem as MouseTriggerChoice)?.Trigger == Loop.Core.Input.MouseTrigger.MiddleDoubleClick;
+        MouseDoubleClickSpeed.IsEnabled = middle;
+        MouseTriggerNote.Visibility = middle ? Visibility.Visible : Visibility.Collapsed;
+    }
 
     private void OnReset(object sender, RoutedEventArgs e) => Load(LoopSettings.CreateDefault());
 
@@ -221,6 +238,16 @@ public partial class SettingsWindow : Window
         OnAddExcluded(sender, e);
         e.Handled = true;
     }
+
+    public sealed record MouseTriggerChoice(MouseTrigger Trigger, string Label);
+
+    private static readonly MouseTriggerChoice[] MouseTriggerChoices =
+    {
+        new(Loop.Core.Input.MouseTrigger.Off, "Off"),
+        new(Loop.Core.Input.MouseTrigger.MiddleDoubleClick, "Double-click the middle button (wheel)"),
+        new(Loop.Core.Input.MouseTrigger.BackButton, "Press the back side button"),
+        new(Loop.Core.Input.MouseTrigger.ForwardButton, "Press the forward side button"),
+    };
 
     public sealed record EasingChoice(EasingKind Kind, string Label);
 

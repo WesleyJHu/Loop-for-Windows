@@ -9,15 +9,18 @@ using static Loop.Platform.Interop.NativeMethods;
 namespace Loop.Platform;
 
 /// <summary>
-/// Wires the keyboard hook to the trigger state machine, the window manager, and the preview.
+/// Wires the input hooks to the trigger and mouse-menu state machines, the window manager, and the preview.
 ///
-/// Threads: the keyboard hook runs on its own thread (see <see cref="KeyboardHook"/>), where key
-/// handling — the trigger state machine and the chord debouncer, guarded by <see cref="_keys"/> —
-/// decides quickly and posts work to the UI thread. Everything that touches windows, the preview,
-/// or settings runs on the UI thread. Construct and <see cref="Start"/> on the UI thread.
+/// Threads: the hooks run on their own thread (see <see cref="InputHook"/>), where input
+/// handling — the trigger state machine, the chord debouncer, and the mouse menu, guarded by
+/// <see cref="_keys"/> — decides quickly and posts work to the UI thread. Everything that touches
+/// windows, the preview, or settings runs on the UI thread. Construct and <see cref="Start"/> on the UI thread.
 ///
 /// In <see cref="ApplyMode.OnRelease"/> mode, keys update a preview and the window moves when the
 /// trigger is released (Esc cancels). In <see cref="ApplyMode.Instant"/> mode, each key applies at once.
+///
+/// The mouse's radial menu (see <see cref="MouseMenuController"/>) always previews, and applies on
+/// release or click, to the window under the cursor where it opened.
 /// </summary>
 public sealed class LoopService : IDisposable
 {
@@ -28,18 +31,28 @@ public sealed class LoopService : IDisposable
     };
 
     private readonly IPreviewOverlay? _overlay;
-    private readonly KeyboardHook _hook;
+    private readonly InputHook _hook;
 
-    /// <summary>Guards the key-handling state (<see cref="_controller"/>, <see cref="_debouncer"/>, <see cref="_enabled"/>).</summary>
+    /// <summary>The radius of the mouse menu's center, in DIPs (between the indicator's center dot and its ring).</summary>
+    private const double MouseDeadZoneDips = 28;
+
+    /// <summary>
+    /// Guards the input-handling state (<see cref="_controller"/>, <see cref="_debouncer"/>,
+    /// <see cref="_mouse"/>, <see cref="_enabled"/>, <see cref="_swallowEscapeUp"/>).
+    /// </summary>
     private readonly object _keys = new();
     private TriggerController _controller = null!;
     private ChordDebouncer<PendingAction> _debouncer = null!;
+    private readonly MouseMenuController _mouse;
     private bool _enabled = true;
+    private bool _swallowEscapeUp;
 
     // UI thread only.
     private WindowManager _windows = null!;
     private LoopSettings _settings = null!;
     private SynchronizationContext? _ui;
+    private IntPtr _mouseTarget;            // the window the open mouse menu acts on
+    private WindowAction? _mouseAction;     // what the mouse menu is previewing
 
     private readonly record struct PendingAction(WindowAction Action, bool NewGesture);
 
@@ -51,7 +64,8 @@ public sealed class LoopService : IDisposable
     {
         _overlay = overlay;
         _indicator = indicator;
-        _hook = new KeyboardHook(OnKey);
+        _hook = new InputHook(OnKey, OnMouse);
+        _mouse = new MouseMenuController(DeadZoneAt, Schedule, InputInjector.SendMouseButtons);
         ApplySettings(settings);
     }
 
@@ -71,7 +85,11 @@ public sealed class LoopService : IDisposable
             {
                 _enabled = value;
                 _controller.Enabled = value;
-                if (!value) _debouncer.Cancel();
+                if (!value)
+                {
+                    _debouncer.Cancel();
+                    _mouse.Reset();
+                }
             }
             if (!value) Post(Cancel);
         }
@@ -101,7 +119,10 @@ public sealed class LoopService : IDisposable
                 // A chord key arriving during the grace period replaces the pending action; the gesture
                 // still started with the first key.
                 merge: (pending, next) => next with { NewGesture = pending.NewGesture || next.NewGesture });
+            if (_mouse.Configure(settings.MouseTrigger, TimeSpan.FromMilliseconds(settings.MouseDoubleClickMs))) Post(Cancel);
         }
+        _mouseTarget = IntPtr.Zero;
+        _hook.MouseEnabled = settings.MouseTrigger != MouseTrigger.Off;
     }
 
     public void Start()
@@ -114,7 +135,11 @@ public sealed class LoopService : IDisposable
     public void Dispose()
     {
         _hook.Dispose();
-        lock (_keys) _debouncer.Cancel();
+        lock (_keys)
+        {
+            _debouncer.Cancel();
+            _mouse.Reset(); // lets a held-back middle click through
+        }
         _windows.FinishAnimation();
         _overlay?.Hide(animate: false);
         _indicator?.Hide(animate: false);
@@ -128,6 +153,22 @@ public sealed class LoopService : IDisposable
 
     private bool HandleKey(KeyEvent e)
     {
+        // Esc closes the mouse menu.
+        if (e.VirtualKey == VirtualKeys.Escape)
+        {
+            if (e.IsDown && _mouse.CancelMenu())
+            {
+                _swallowEscapeUp = true;
+                Post(Cancel);
+                return true;
+            }
+            if (!e.IsDown && _swallowEscapeUp)
+            {
+                _swallowEscapeUp = false;
+                return true;
+            }
+        }
+
         var wasActive = _controller.IsTriggerActive;
 
         // Before acting on a non-modifier press, re-read the real modifier state so a missed
@@ -138,6 +179,10 @@ public sealed class LoopService : IDisposable
         var decision = _controller.Process(e);
 
         if (decision.SendMaskKey) InputInjector.SendMaskKey();
+
+        // The keyboard trigger takes over from an open mouse menu (its release would otherwise
+        // commit the mouse's preview).
+        if (_controller.IsTriggerActive && _mouse.CancelMenu()) Post(Cancel);
 
         if (decision.Cancel)
         {
@@ -158,6 +203,79 @@ public sealed class LoopService : IDisposable
         return decision.Swallow;
     }
 
+    /// <summary>Runs on the hook thread for every mouse event (including every move). Must be very quick.</summary>
+    private bool OnMouse(MouseEvent e)
+    {
+        lock (_keys)
+        {
+            var d = _mouse.Process(e, canOpen: _enabled && !_controller.IsTriggerActive);
+            switch (d.Effect)
+            {
+                case MouseMenuEffect.Open: Post(() => MouseOpen(d.X, d.Y)); break;
+                case MouseMenuEffect.Select: Post(() => MouseSelect(d.Segment)); break;
+                case MouseMenuEffect.Cycle: Post(MouseCycle); break;
+                case MouseMenuEffect.Commit: Post(Commit); break;
+                case MouseMenuEffect.Cancel: Post(Cancel); break;
+            }
+            return d.Swallow;
+        }
+    }
+
+    private void MouseOpen(int x, int y) => Guard("open the mouse menu", () =>
+    {
+        if (_windows.IsPreviewing)
+        {
+            _windows.CancelPreview();
+            _overlay?.Hide(AnimateVisuals);
+        }
+
+        _mouseAction = null;
+        _mouseTarget = WindowManager.GetWindowAt(x, y);
+        if (_mouseTarget == IntPtr.Zero)
+        {
+            // Nothing Loop can move here (the desktop, the taskbar): don't show a menu that does nothing.
+            lock (_keys) _mouse.CancelMenu();
+            return;
+        }
+        _indicator?.Show(IndicatorSegment.None, AnimateVisuals, (x, y));
+    });
+
+    private void MouseSelect(IndicatorSegment segment) => Guard("select in the mouse menu", () =>
+    {
+        if (_mouseTarget == IntPtr.Zero) return; // the menu was closed
+
+        // Each selection is planned from where the window really is, so moving the cursor from
+        // left to top and back previews the left half again rather than cycling it.
+        _windows.CancelPreview();
+        _mouseAction = Indicator.ActionFor(segment);
+        var animate = AnimateVisuals;
+        _indicator?.Show(segment, animate);
+        if (_mouseAction is { } action) ShowPreview(_windows.Preview(action, newGesture: true, _mouseTarget), animate);
+        else _overlay?.Hide(animate);
+    });
+
+    /// <summary>The wheel steps the selected layout through its cycle sizes, like pressing its key again.</summary>
+    private void MouseCycle() => Guard("cycle in the mouse menu", () =>
+    {
+        if (_mouseTarget == IntPtr.Zero || _mouseAction is not { } action) return;
+        ShowPreview(_windows.Preview(action, newGesture: true, _mouseTarget), AnimateVisuals);
+    });
+
+    private void ShowPreview(PlannedAction? planned, bool animate)
+    {
+        if (_overlay is null || planned is null) return;
+        if (planned is { Kind: not PlanKind.Minimize } move && _settings.ShowPreview) _overlay.Show(move.Target, move.Display.Bounds, animate);
+        else _overlay.Hide(animate);
+    }
+
+    /// <summary>The mouse menu's center radius in physical pixels at a point.</summary>
+    private static double DeadZoneAt(double x, double y)
+    {
+        var monitor = MonitorFromPoint(new POINT { X = (int)x, Y = (int)y }, MONITOR_DEFAULTTONEAREST);
+        var dpi = GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, out var dpiX, out _) == 0 ? dpiX : 96u;
+        return MouseDeadZoneDips * dpi / 96.0;
+    }
+
     private void Execute(PendingAction p)
     {
         Guard(p.Action.ToString(), () =>
@@ -172,9 +290,7 @@ public sealed class LoopService : IDisposable
             var planned = _windows.Preview(p.Action, p.NewGesture);
             if (planned is null) return;
             ShowIndicator(p.Action, animate);
-            if (_overlay is null) return;
-            if (planned is { Kind: not PlanKind.Minimize } move && _settings.ShowPreview) _overlay.Show(move.Target, move.Display.Bounds, animate);
-            else _overlay.Hide(animate);
+            ShowPreview(planned, animate);
         });
     }
 
@@ -185,6 +301,7 @@ public sealed class LoopService : IDisposable
 
     private void Commit() => Guard("commit", () =>
     {
+        _mouseTarget = IntPtr.Zero;
         var animate = AnimateVisuals;
         _overlay?.Hide(animate);
         _indicator?.Hide(animate);
@@ -193,6 +310,7 @@ public sealed class LoopService : IDisposable
 
     private void Cancel() => Guard("cancel", () =>
     {
+        _mouseTarget = IntPtr.Zero;
         var animate = AnimateVisuals;
         _overlay?.Hide(animate);
         _indicator?.Hide(animate);
@@ -210,7 +328,7 @@ public sealed class LoopService : IDisposable
         }, null);
     }
 
-    /// <summary>Runs a debouncer callback after <paramref name="delay"/>, under the key-handling lock.</summary>
+    /// <summary>Runs a debouncer or mouse-menu callback after <paramref name="delay"/>, under the input-handling lock.</summary>
     private IDisposable Schedule(TimeSpan delay, Action callback) =>
         new Timer(_ =>
         {

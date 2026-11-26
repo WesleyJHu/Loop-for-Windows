@@ -19,8 +19,12 @@ public interface IPreviewOverlay
 /// <summary>The radial direction indicator shown near the cursor while the trigger is held.</summary>
 public interface IDirectionIndicator
 {
-    /// <summary>Shows the indicator (at the cursor, if it wasn't already showing) highlighting <paramref name="segment"/>.</summary>
-    void Show(IndicatorSegment segment, bool animate);
+    /// <summary>
+    /// Shows the indicator highlighting <paramref name="segment"/>. It is centered on
+    /// <paramref name="center"/> (physical pixels) when given; otherwise on the cursor, if it wasn't
+    /// already showing.
+    /// </summary>
+    void Show(IndicatorSegment segment, bool animate, (int X, int Y)? center = null);
 
     void Hide(bool animate);
 }

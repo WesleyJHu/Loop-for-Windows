@@ -43,6 +43,19 @@ public static class LoopSmoke {
   [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonEnum cb, IntPtr d);
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int cb);
+  [StructLayout(LayoutKind.Sequential)] public struct MI { public int dx; public int dy; public uint data; public uint flags; public uint time; public UIntPtr extra; }
+  [StructLayout(LayoutKind.Explicit, Size=40)] public struct MINPUT { [FieldOffset(0)] public uint type; [FieldOffset(8)] public MI mi; }
+  [DllImport("user32.dll", EntryPoint="SendInput")] static extern uint SendMouseInput(uint n, MINPUT[] i, int cb);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int i);
+  public static void Mouse(uint flags, int dx, int dy, uint data) {
+    var i = new MINPUT[1]; i[0].type = 0; i[0].mi.flags = flags; i[0].mi.dx = dx; i[0].mi.dy = dy; i[0].mi.data = data;
+    SendMouseInput(1, i, Marshal.SizeOf(typeof(MINPUT)));
+  }
+  // Moves the cursor to (x, y) in physical pixels, as real mouse input (no pointer acceleration).
+  public static void MoveTo(int x, int y) {
+    int vx = GetSystemMetrics(76), vy = GetSystemMetrics(77), vw = GetSystemMetrics(78), vh = GetSystemMetrics(79);
+    Mouse(0x0001 | 0x8000 | 0x4000, (int)((x - vx) * 65535L / (vw - 1)), (int)((y - vy) * 65535L / (vh - 1)), 0);
+  }
   public static void Key(int vk, bool up) {
     var i = new INPUT[1]; i[0].type = 1; i[0].ki.vk = (ushort)vk; i[0].ki.flags = up ? 2u : 0u;
     SendInput(1, i, Marshal.SizeOf(typeof(INPUT)));
@@ -440,6 +453,79 @@ try {
     $before = [LoopSmoke]::Frame($h)
     Send-Chord @($VK.Left)
     Check 'excluded app is not moved' $before
+
+    # ============================ Mouse radial menu ===============================================
+    Start-Loop @{ MouseTrigger = 'MiddleDoubleClick' }
+    Write-Host "[settings: mouse menu on middle double-click]"
+    $MB = @{ LeftDown = 0x2; LeftUp = 0x4; RightDown = 0x8; RightUp = 0x10; MiddleDown = 0x20; MiddleUp = 0x40; Wheel = 0x800 }
+    function Button([int]$flags) { [LoopSmoke]::Mouse($flags, 0, 0, 0); Start-Sleep -Milliseconds 40 }
+    function Mouse-To([int]$x, [int]$y) { [LoopSmoke]::MoveTo($x, $y); Start-Sleep -Milliseconds 40 }
+    function Get-Indicator { [LoopSmoke]::FindWindow([NullString]::Value, 'Loop indicator') }
+    function Indicator-Visible { $i = Get-Indicator; ($i -ne [IntPtr]::Zero) -and [LoopSmoke]::IsWindowVisible($i) }
+    # Brings the target to the front, puts the cursor in its middle, and double-clicks the middle
+    # button, keeping the second press held. Returns the menu's center.
+    function Open-MouseMenu {
+        Focus-Target
+        $f = [LoopSmoke]::Frame($h); $c = @(($f[0] + [int]($f[2] / 2)), ($f[1] + [int]($f[3] / 2)))
+        Mouse-To $c[0] $c[1]
+        Button $MB.MiddleDown; Button $MB.MiddleUp; Button $MB.MiddleDown
+        Start-Sleep -Milliseconds 150
+        , $c
+    }
+    # Moves from the menu's center in a direction, in two steps (like a hand would).
+    function Drag-Toward([int[]]$c, [int]$dx, [int]$dy) {
+        Mouse-To ($c[0] + [int]($dx / 2)) ($c[1] + [int]($dy / 2)); Mouse-To ($c[0] + $dx) ($c[1] + $dy)
+        Start-Sleep -Milliseconds 150
+    }
+
+    $c = Open-MouseMenu
+    Check-True 'mouse: double-click opens the menu' (Indicator-Visible)
+    Drag-Toward $c -150 0
+    Check-True 'mouse: dragging shows the preview' (Overlay-Visible)
+    Button $MB.MiddleUp; Start-Sleep -Milliseconds 500
+    Check-True 'mouse: menu closes on release' (-not (Indicator-Visible))
+    Check 'mouse: drag left, release: left half' (Expect-Layout 'LeftHalf' $work)
+
+    $c = Open-MouseMenu
+    Drag-Toward $c 120 -120
+    Button $MB.MiddleUp; Start-Sleep -Milliseconds 500
+    Check 'mouse: drag up-right: top-right corner' (Expect-Layout 'TopRight' $work)
+
+    $c = Open-MouseMenu
+    Button $MB.MiddleUp; Start-Sleep -Milliseconds 150
+    Check-True 'mouse: quick release keeps it open' (Indicator-Visible)
+    Drag-Toward $c -120 120
+    Button $MB.LeftDown; Button $MB.LeftUp; Start-Sleep -Milliseconds 500
+    Check-True 'mouse: click closes the menu' (-not (Indicator-Visible))
+    Check 'mouse: click mode, down-left: bottom-left' (Expect-Layout 'BottomLeft' $work)
+
+    $before = [LoopSmoke]::Frame($h)
+    $c = Open-MouseMenu
+    Drag-Toward $c 150 0
+    Button $MB.RightDown; Button $MB.RightUp; Button $MB.MiddleUp; Start-Sleep -Milliseconds 500
+    Check-True 'mouse: right-click cancels' ((-not (Indicator-Visible)) -and (-not (Overlay-Visible)))
+    Check 'mouse: cancelled: window unchanged' $before
+
+    $c = Open-MouseMenu
+    Drag-Toward $c 0 150
+    [LoopSmoke]::Mouse($MB.Wheel, 0, 0, 120); Start-Sleep -Milliseconds 40  # one notch steps the cycle: 1/2 -> 1/3
+    Button $MB.MiddleUp; Start-Sleep -Milliseconds 500
+    Check 'mouse: wheel cycles: bottom third' (Expect-Layout 'BottomHalf' $work (1.0 / 3))
+
+    $c = Open-MouseMenu
+    Button $MB.MiddleUp; Start-Sleep -Milliseconds 100
+    Button $MB.LeftDown; Button $MB.LeftUp; Start-Sleep -Milliseconds 700
+    Check-True 'mouse: clicking the center maximizes' ([LoopSmoke]::IsZoomed($h))
+    $c = Open-MouseMenu
+    Button $MB.MiddleUp; Start-Sleep -Milliseconds 100
+    Button $MB.LeftDown; Button $MB.LeftUp; Start-Sleep -Milliseconds 700
+    Check-True 'mouse: clicking it again restores' (-not [LoopSmoke]::IsZoomed($h))
+
+    Focus-Target
+    $before = [LoopSmoke]::Frame($h)
+    Button $MB.MiddleDown; Button $MB.MiddleUp; Start-Sleep -Milliseconds 600
+    Check-True 'mouse: a single middle click opens nothing' (-not (Indicator-Visible))
+    Check 'mouse: single click: window unchanged' $before
 }
 finally {
     Stop-Loop

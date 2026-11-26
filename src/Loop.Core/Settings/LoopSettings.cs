@@ -67,6 +67,15 @@ public sealed class LoopSettings
 
     public const int MaxAnimationDurationMs = 1000;
 
+    /// <summary>What opens the radial menu with the mouse (off by default: a middle-click trigger delays every middle click).</summary>
+    public MouseTrigger MouseTrigger { get; set; } = MouseTrigger.Off;
+
+    /// <summary>For <see cref="MouseTrigger.MiddleDoubleClick"/>: how quickly the second press must follow the first.</summary>
+    public int MouseDoubleClickMs { get; set; } = 300;
+
+    public const int MinMouseDoubleClickMs = 100;
+    public const int MaxMouseDoubleClickMs = 1000;
+
     /// <summary>
     /// Run Loop with administrator rights, so it can move windows of apps that run as administrator
     /// (Windows keeps normal apps from touching those, and even from seeing keys while they have focus).
@@ -117,6 +126,8 @@ public sealed class LoopSettings
         AnimationDurationMs = AnimationDurationMs,
         AnimationEasing = AnimationEasing,
         ShowIndicator = ShowIndicator,
+        MouseTrigger = MouseTrigger,
+        MouseDoubleClickMs = MouseDoubleClickMs,
         RunAsAdministrator = RunAsAdministrator,
         LaunchAtStartup = LaunchAtStartup,
     };
@@ -138,6 +149,9 @@ public sealed class LoopSettings
         if (AnimationDurationMs is < 0 or > MaxAnimationDurationMs)
             errors.Add($"Animation duration must be 0–{MaxAnimationDurationMs} ms.");
         if (!Enum.IsDefined(AnimationEasing)) errors.Add("Unknown animation easing.");
+        if (!Enum.IsDefined(MouseTrigger)) errors.Add("Unknown mouse trigger.");
+        if (MouseDoubleClickMs is < MinMouseDoubleClickMs or > MaxMouseDoubleClickMs)
+            errors.Add($"Double-click speed must be {MinMouseDoubleClickMs}–{MaxMouseDoubleClickMs} ms.");
 
         if (CycleSizes is null || CycleSizes.Count is 0 or > MaxCycleSizes)
             errors.Add($"Enter 1–{MaxCycleSizes} cycle sizes.");

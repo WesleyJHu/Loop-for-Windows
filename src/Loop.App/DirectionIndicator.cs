@@ -70,17 +70,18 @@ internal sealed class DirectionIndicator : IDirectionIndicator
     /// <inheritdoc cref="ClickThroughWindow.Prewarm"/>
     public void Prewarm() => _window.Prewarm();
 
-    public void Show(IndicatorSegment segment, bool animate)
+    public void Show(IndicatorSegment segment, bool animate, (int X, int Y)? center = null)
     {
         var fade = animate ? _animation.FadeDuration : TimeSpan.Zero;
         if (!_window.IsVisible)
         {
             Light(segment, animate: false);
             _window.EnsureShown(startTransparent: animate);
-            _window.SetBounds(AroundCursor());
+            _window.SetBounds(Around(center ?? CursorPosition()));
         }
         else
         {
+            if (center is { } c) _window.SetBounds(Around(c)); // e.g. reopened while still fading out
             Light(segment, animate);
         }
         _window.Fade(1, fade);
@@ -136,10 +137,16 @@ internal sealed class DirectionIndicator : IDirectionIndicator
         return geometry;
     }
 
-    /// <summary>The indicator's bounds in physical pixels, centered on the cursor and sized for its monitor's DPI.</summary>
-    private static Rect AroundCursor()
+    private static (int X, int Y) CursorPosition()
     {
         GetCursorPos(out var p);
+        return (p.X, p.Y);
+    }
+
+    /// <summary>The indicator's bounds in physical pixels, centered on a point and sized for its monitor's DPI.</summary>
+    private static Rect Around((int X, int Y) center)
+    {
+        var p = new POINT { X = center.X, Y = center.Y };
         var dpi = GetDpiForMonitor(MonitorFromPoint(p, 2), 0, out var x, out _) == 0 ? x : 96u;
         var px = (int)Math.Round(Size * dpi / 96.0);
         return new Rect(p.X - px / 2, p.Y - px / 2, px, px);

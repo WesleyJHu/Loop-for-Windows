@@ -38,6 +38,24 @@ public static class Indicator
         _ => IndicatorSegment.None,
     };
 
+    /// <summary>
+    /// What choosing a segment of the mouse's radial menu does: a direction gives that half or
+    /// corner, the center maximizes (or restores a maximized window). None for <see cref="IndicatorSegment.None"/>.
+    /// </summary>
+    public static WindowAction? ActionFor(IndicatorSegment segment) => segment switch
+    {
+        IndicatorSegment.Right => WindowAction.RightHalf,
+        IndicatorSegment.TopRight => WindowAction.TopRight,
+        IndicatorSegment.Top => WindowAction.TopHalf,
+        IndicatorSegment.TopLeft => WindowAction.TopLeft,
+        IndicatorSegment.Left => WindowAction.LeftHalf,
+        IndicatorSegment.BottomLeft => WindowAction.BottomLeft,
+        IndicatorSegment.Bottom => WindowAction.BottomHalf,
+        IndicatorSegment.BottomRight => WindowAction.BottomRight,
+        IndicatorSegment.Center => WindowAction.Maximize,
+        _ => null,
+    };
+
     /// <summary>The angle of a direction segment's middle, in degrees counter-clockwise from the right.</summary>
     public static double AngleOf(IndicatorSegment segment) =>
         segment <= IndicatorSegment.BottomRight

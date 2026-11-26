@@ -71,6 +71,25 @@ every sign-in. Turning it off restarts Loop normally and removes the scheduled t
 
 Without the trigger, every key behaves normally.
 
+## Mouse
+
+Turn on the mouse trigger in settings (*Mouse > Open the menu with*) to snap windows with the mouse, like
+macOS Loop's radial menu. **Double-click the middle button** (press the scroll wheel twice quickly) over a
+window, and a ring appears at the cursor:
+
+- **Drag:** keep the second press held, move toward a direction, and let go: the window under the
+  cursor snaps to that half or corner. The preview shows where it will go before you let go.
+- **Click:** let go without moving and the menu stays open; move to a direction and click.
+- **The middle** maximizes (or restores a maximized window). While dragging, it counts only once you
+  have moved out and come back, so a quick double-click doesn't maximize.
+- **Scroll** to cycle the chosen layout's size (½ → ⅓ → ⅔), like pressing its arrow again.
+- **Right-click** or **Esc** cancels.
+
+Loop has to wait a moment after a middle click to see whether a second press follows, so a single
+middle click (opening a link in a new tab, closing a tab) reaches apps up to the double-click speed later
+(300 ms by default, adjustable). Middle-button drags (panning) start as soon as you move. If you'd rather
+not have that delay, open the menu with the back or forward side button instead: a single press opens it.
+
 ## Settings
 
 Right-click the tray icon and choose **Settings…** (or double-click the icon). You can change:
@@ -81,6 +100,7 @@ Right-click the tray icon and choose **Settings…** (or double-click the icon).
 - the key for **every action**: click it and press the new key (the window has an action for each half,
   corner, display, and so on, not just the defaults above)
 - **animation**: window glides and preview animation on/off, duration, easing, and the direction indicator
+- the **mouse trigger** for the radial menu (off, middle double-click, or a side button) and the double-click speed
 - **excluded apps**, by process name (e.g. `notepad`)
 - **start at sign-in**, and **run as administrator**
 
@@ -112,17 +132,17 @@ Environment variables:
 
 | Project | Purpose |
 |---|---|
-| `src/Loop.Core` | Pure logic: key state machine, chords, layout math and gaps, size cycling, gesture and preview planning, display ordering, placement planning, easing and animation policy, settings and their JSON format. No Win32. |
-| `src/Loop.Platform` | Win32 interop: low-level keyboard hook (on its own thread), input injection, window and monitor APIs, the window animator, startup registration, and the service that wires them together. |
+| `src/Loop.Core` | Pure logic: key state machine, mouse-menu state machine, chords, layout math and gaps, size cycling, gesture and preview planning, display ordering, placement planning, easing and animation policy, settings and their JSON format. No Win32. |
+| `src/Loop.Platform` | Win32 interop: low-level keyboard and mouse hooks (on their own thread), input injection, window and monitor APIs, the window animator, startup registration, and the service that wires them together. |
 | `src/Loop.App` | WPF app: tray icon, preview overlay, direction indicator, settings window, single instance, Per-Monitor V2 DPI manifest. |
 | `tests/Loop.Core.Tests` | xUnit tests for everything in Core. |
 | `tests/smoke` | End-to-end smoke test using SendInput against a throwaway DPI-unaware window. |
 | `installer` | Inno Setup script and the build script that publishes Loop and makes the installer. |
 | `tools` | The icon generator. |
 
-**Threads.** The keyboard hook has a dedicated thread that only pumps messages and decides what each
-key means. Windows skips a low-level hook that doesn't answer quickly and passes the key through, so the
-hook must never wait behind UI work (rendering the preview, finishing an animation, a slow app's
+**Threads.** The keyboard and mouse hooks share a dedicated thread that only pumps messages and decides
+what each key or click means. Windows skips a low-level hook that doesn't answer quickly and passes the
+input through, so the hooks must never wait behind UI work (rendering the preview, finishing an animation, a slow app's
 `SetWindowPos`). Window moves and visuals run on the UI thread; animation frames run on a background
 thread. With `LOOP_LOG` set, Loop logs whenever UI work waits more than 50 ms or takes more than 30 ms.
 
@@ -152,3 +172,6 @@ on common resolutions.
   direction indicator, animation settings; keyboard hook moved to its own thread)
 - [x] **Phase 7**: run as administrator (with an elevated startup task), undo to the previous position,
   app icon, installer, release workflow
+- [x] **Phase 8**: mouse radial menu (middle double-click or a side button; drag or click to choose,
+  scroll to cycle sizes), acting on the window under the cursor. The mouse hook is only installed while
+  a mouse trigger is set.

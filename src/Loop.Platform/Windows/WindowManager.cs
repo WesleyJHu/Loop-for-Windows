@@ -48,15 +48,16 @@ public sealed class WindowManager
     public bool IsPreviewing => _planner.IsActive;
 
     /// <summary>
-    /// Plans <paramref name="action"/> without moving anything, starting a preview for the foreground
-    /// window if none is active. Returns the pending result, or null when there is no window to act on.
+    /// Plans <paramref name="action"/> without moving anything, starting a preview if none is active:
+    /// for <paramref name="window"/>, or the foreground window when that is zero. Returns the pending
+    /// result, or null when there is no window to act on.
     /// </summary>
-    public PlannedAction? Preview(WindowAction action, bool newGesture)
+    public PlannedAction? Preview(WindowAction action, bool newGesture, IntPtr window = default)
     {
         if (!_planner.IsActive)
         {
             FinishAnimation(); // measure the window where it is going, not mid-glide
-            if (!TryBegin()) return null;
+            if (!TryBegin(window)) return null;
         }
         return _planner.Step(action, newGesture);
     }
@@ -114,9 +115,9 @@ public sealed class WindowManager
         return true;
     }
 
-    private bool TryBegin()
+    private bool TryBegin(IntPtr window = default)
     {
-        var hwnd = GetTargetWindow();
+        var hwnd = window != IntPtr.Zero ? window : GetTargetWindow();
         if (hwnd == IntPtr.Zero || IsExcluded(hwnd) || !TryMeasure(hwnd, out _, out var visible)) return false;
 
         var displays = MonitorService.GetDisplays();
@@ -288,9 +289,14 @@ public sealed class WindowManager
     }
 
     /// <summary>The top-level window that has focus, or zero if it is something Loop should not move.</summary>
-    public static IntPtr GetTargetWindow()
+    public static IntPtr GetTargetWindow() => Movable(GetForegroundWindow());
+
+    /// <summary>The top-level window at a point (physical pixels), or zero if it is something Loop should not move.</summary>
+    public static IntPtr GetWindowAt(int x, int y) => Movable(WindowFromPoint(new POINT { X = x, Y = y }));
+
+    /// <summary><paramref name="hwnd"/>'s top-level window, or zero if it is something Loop should not move.</summary>
+    private static IntPtr Movable(IntPtr hwnd)
     {
-        var hwnd = GetForegroundWindow();
         if (hwnd == IntPtr.Zero) return IntPtr.Zero;
 
         var root = GetAncestor(hwnd, GA_ROOT);

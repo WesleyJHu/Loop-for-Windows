@@ -79,6 +79,33 @@
                     </StackPanel>
                 </GroupBox>
 
+                <GroupBox Header="Mouse">
+                    <StackPanel>
+                        <TextBlock Style="{StaticResource Hint}"
+                                   Text="Open a radial menu at the cursor to snap the window under it. Keep holding, move toward a direction, and let go; or let go right away and click a direction. The middle maximizes, scrolling cycles sizes, and right-click or Esc cancels." />
+                        <Grid Margin="0,4,0,0">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="110" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <TextBlock Text="Open the menu with" Style="{StaticResource Label}" />
+                            <ComboBox x:Name="MouseTrigger" Grid.Column="1" Grid.ColumnSpan="2" Margin="0,3"
+                                      HorizontalAlignment="Left" MinWidth="260" SelectionChanged="OnMouseTriggerChanged" />
+                            <TextBlock Grid.Row="1" Text="Double-click speed (ms)" Style="{StaticResource Label}" />
+                            <TextBox x:Name="MouseDoubleClickSpeed" Grid.Row="1" Grid.Column="1" Margin="0,3" />
+                            <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource Hint}" Margin="10,0,0,0"
+                                       VerticalAlignment="Center" Text="The second press must follow this quickly" />
+                        </Grid>
+                        <TextBlock x:Name="MouseTriggerNote" Style="{StaticResource Hint}" Margin="0,6,0,0"
+                                   Text="A single middle click still works, but reaches apps this much later, while Loop waits to see whether a second press follows." />
+                    </StackPanel>
+                </GroupBox>
+
                 <GroupBox Header="Behavior">
                     <StackPanel>
                         <RadioButton x:Name="ModeOnRelease" GroupName="Mode"
