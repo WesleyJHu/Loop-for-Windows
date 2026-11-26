@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Pure logic: no Win32 dependencies so it can be unit-tested anywhere. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Loop.Core</RootNamespace>
+  </PropertyGroup>
+
+</Project>
