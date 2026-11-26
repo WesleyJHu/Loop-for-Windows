@@ -72,25 +72,70 @@ public class LayoutEngineTests
     }
 
     [Fact]
-    public void MaximizeWidth_KeepsVerticalPositionAndHeight() =>
-        Assert.Equal(new Rect(0, 200, 1920, 600), Compute(WindowAction.MaximizeWidth));
-
-    [Fact]
-    public void MaximizeHeight_KeepsHorizontalPositionAndWidth() =>
-        Assert.Equal(new Rect(300, 0, 800, 1040), Compute(WindowAction.MaximizeHeight));
-
-    [Fact]
-    public void MaximizeWidth_PullsOffscreenWindowBackInside()
+    public void CenterQuarter_IsCornerSizedAndCentered()
     {
-        var hanging = new Rect(100, 900, 800, 600); // bottom edge at 1500, beyond the 1040 work area
-        Assert.Equal(new Rect(0, 440, 1920, 600), Compute(WindowAction.MaximizeWidth, current: hanging));
+        var r = Compute(WindowAction.CenterQuarter);
+        var corner = Compute(WindowAction.TopLeft);
+        Assert.Equal((corner.Width, corner.Height), (r.Width, r.Height));
+        Assert.Equal(new Rect(480, 260, 960, 520), r);
     }
 
     [Fact]
-    public void MaximizeHeight_ShrinksWindowWiderThanWorkArea()
+    public void CenterQuarter_IgnoresCurrentSize() =>
+        Assert.Equal(Compute(WindowAction.CenterQuarter, current: new Rect(0, 0, 100, 100)), Compute(WindowAction.CenterQuarter));
+
+    [Theory]
+    [InlineData(1.0 / 3, 640)]
+    [InlineData(2.0 / 3, 1280)]
+    public void CenterQuarter_CyclesWidthOnly(double fraction, int expectedWidth) =>
+        Assert.Equal(new Rect((1920 - expectedWidth) / 2, 260, expectedWidth, 520),
+            Compute(WindowAction.CenterQuarter, fraction: fraction));
+
+    [Theory]
+    [InlineData(WindowAction.TopLeft, 0, 0)]
+    [InlineData(WindowAction.TopRight, 1280, 0)]
+    [InlineData(WindowAction.BottomLeft, 0, 520)]
+    [InlineData(WindowAction.BottomRight, 1280, 520)]
+    public void Corners_CycleWidthButKeepHalfHeight(WindowAction action, int x, int y) =>
+        Assert.Equal(new Rect(x, y, 640, 520), Compute(action, fraction: 1.0 / 3));
+
+    [Theory]
+    [InlineData(WindowAction.TopHalf, 0, 0, 1920, 347)]
+    [InlineData(WindowAction.BottomHalf, 0, 693, 1920, 347)]
+    public void VerticalHalves_CycleHeight(WindowAction action, int x, int y, int w, int h) =>
+        Assert.Equal(new Rect(x, y, w, h), Compute(action, fraction: 1.0 / 3));
+
+    [Fact]
+    public void Remap_KeepsRelativeLayout()
     {
-        var huge = new Rect(-100, 0, 3000, 500);
-        Assert.Equal(new Rect(0, 0, 1920, 1040), Compute(WindowAction.MaximizeHeight, current: huge));
+        // Left third of a 1080p screen -> left third of a 1440p screen to its right.
+        var from = new Rect(0, 0, 1920, 1080);
+        var to = new Rect(1920, 0, 2560, 1440);
+        Assert.Equal(new Rect(1920, 0, 853, 1440), LayoutEngine.Remap(new Rect(0, 0, 640, 1080), from, to));
+    }
+
+    [Fact]
+    public void Remap_ScalesFloatingWindow()
+    {
+        var from = new Rect(0, 0, 1920, 1080);
+        var to = new Rect(-348, 1080, 1920, 1080); // same size, offset below-left
+        Assert.Equal(new Rect(-48, 1280, 800, 600), LayoutEngine.Remap(new Rect(300, 200, 800, 600), from, to));
+    }
+
+    [Fact]
+    public void Remap_KeepsWindowInsideSmallerDestination()
+    {
+        var from = new Rect(0, 0, 3840, 2160);
+        var to = new Rect(3840, 0, 1280, 720);
+        var r = LayoutEngine.Remap(new Rect(3000, 1500, 1000, 800), from, to); // partly off the source screen
+        Assert.True(to.Contains(r), $"{r} not inside {to}");
+    }
+
+    [Fact]
+    public void Remap_EmptyAreas_LeaveWindowAlone()
+    {
+        var window = new Rect(10, 10, 100, 100);
+        Assert.Equal(window, LayoutEngine.Remap(window, default, new Rect(0, 0, 100, 100)));
     }
 
     [Fact]
@@ -130,9 +175,12 @@ public class LayoutEngineTests
         Assert.Equal(odd.Right, rightTwoThirds.Right);
     }
 
-    [Fact]
-    public void Minimize_HasNoRectangle() =>
-        Assert.Throws<ArgumentException>(() => Compute(WindowAction.Minimize));
+    [Theory]
+    [InlineData(WindowAction.Minimize)]
+    [InlineData(WindowAction.NextDisplay)]
+    [InlineData(WindowAction.Display2)]
+    public void NonLayoutActions_HaveNoRectangle(WindowAction action) =>
+        Assert.Throws<ArgumentException>(() => Compute(action));
 
     [Theory]
     [InlineData(0)]
@@ -146,7 +194,7 @@ public class LayoutEngineTests
     public void EveryGeometricAction_StaysInsideWorkArea()
     {
         var offscreen = new Rect(-5000, -5000, 4000, 4000);
-        foreach (var action in Enum.GetValues<WindowAction>().Where(a => a.IsGeometric()))
+        foreach (var action in Enum.GetValues<WindowAction>().Where(a => a.IsLayout()))
         {
             foreach (var current in new[] { Window, offscreen })
             {

@@ -1,7 +1,8 @@
 ﻿using System;
+using System.Linq;
 using System.Threading;
 using System.Windows;
-using Loop.Core.Input;
+using Loop.Core.Settings;
 using Loop.Platform;
 
 namespace Loop.App;
@@ -10,12 +11,12 @@ public partial class App : Application
 {
     private const string MutexName = @"Local\LoopForWindows.SingleInstance";
 
-    /// <summary>Phase 1 default; becomes user-configurable in Phase 5.</summary>
-    private const ModifierKeys DefaultTrigger = ModifierKeys.Ctrl | ModifierKeys.Win | ModifierKeys.Alt;
-
     private Mutex? _singleInstance;
     private LoopService? _loop;
+    private PreviewOverlay? _overlay;
     private TrayIcon? _tray;
+    private SettingsWindow? _settingsWindow;
+    private string _settingsPath = SettingsStore.DefaultPath;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -24,14 +25,20 @@ public partial class App : Application
         _singleInstance = new Mutex(initiallyOwned: true, MutexName, out var isFirstInstance);
         if (!isFirstInstance)
         {
-            MessageBox.Show("Loop is already running.", "Loop", MessageBoxButton.OK, MessageBoxImage.Information);
+            MessageBox.Show("Loop is already running. Right-click its tray icon for settings.", "Loop",
+                MessageBoxButton.OK, MessageBoxImage.Information);
             Shutdown();
             return;
         }
 
+        // LOOP_SETTINGS points at another settings file (used by the smoke test).
+        _settingsPath = Environment.GetEnvironmentVariable("LOOP_SETTINGS") is { Length: > 0 } p ? p : SettingsStore.DefaultPath;
+        var (settings, problem) = SettingsStore.Load(_settingsPath);
+
         try
         {
-            _loop = new LoopService(new TriggerController(DefaultTrigger, KeyBindings.Default));
+            _overlay = new PreviewOverlay(settings.PreviewColor);
+            _loop = new LoopService(settings, _overlay);
             _loop.Start();
         }
         catch (Exception ex)
@@ -41,13 +48,48 @@ public partial class App : Application
             return;
         }
 
-        _tray = new TrayIcon(_loop, DefaultTrigger, onQuit: () => Shutdown());
+        _tray = new TrayIcon(settings.Trigger,
+            onEnabledChanged: enabled => _loop.Enabled = enabled,
+            onSettings: OpenSettings,
+            onQuit: () => Shutdown());
+
+        if (problem is not null) _tray.ShowWarning(problem);
+        if (e.Args.Contains("--settings", StringComparer.OrdinalIgnoreCase)) OpenSettings();
+    }
+
+    private void OpenSettings()
+    {
+        if (_loop is null) return;
+        if (_settingsWindow is not null)
+        {
+            _settingsWindow.Activate();
+            return;
+        }
+
+        _settingsWindow = new SettingsWindow(_loop.Settings, StartupRegistration.IsEnabled());
+        _settingsWindow.Saved += OnSettingsSaved;
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
+        _settingsWindow.Show();
+        _settingsWindow.Activate();
+    }
+
+    private void OnSettingsSaved(LoopSettings settings, bool launchAtStartup)
+    {
+        // Throws on failure; the settings window shows the message and stays open.
+        SettingsStore.Save(_settingsPath, settings);
+        if (launchAtStartup != StartupRegistration.IsEnabled() && Environment.ProcessPath is { } exe)
+            StartupRegistration.SetEnabled(launchAtStartup, exe);
+
+        _loop!.ApplySettings(settings);
+        _overlay!.SetColor(settings.PreviewColor);
+        _tray!.SetTrigger(settings.Trigger);
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
         _tray?.Dispose();
         _loop?.Dispose();
+        _overlay?.Close();
         _singleInstance?.Dispose();
         base.OnExit(e);
     }

@@ -1,63 +1,131 @@
 <#
 .SYNOPSIS
-  End-to-end smoke test: launches Loop and a throwaway WinForms window, injects
-  Ctrl+Win+Alt chords with SendInput, and checks where the window's visible frame lands.
+  End-to-end smoke test: launches Loop and a throwaway WinForms window, injects trigger chords
+  with SendInput, and checks where the window (and the preview overlay) land.
 
 .NOTES
-  - Steals keyboard focus for ~15 seconds; don't type while it runs.
-  - Other window managers (AquaSnap, FancyZones, DisplayFusion...) that react to window moves
-    will make geometry checks fail. Pause them first.
-  - Run from Windows PowerShell 5.1 or PowerShell 7:  .\tests\smoke\Invoke-SmokeTest.ps1
+  - Steals keyboard focus for about a minute; don't type while it runs.
+  - Loop runs with its own temporary settings file (LOOP_SETTINGS); your settings are untouched.
+    Quit any running Loop first (only one instance can run).
+  - The target is a DPI-unaware WinForms window: the hardest case for mixed-DPI setups.
+  - Display checks run only when more than one monitor is connected.
+  - Run:  .\tests\smoke\Invoke-SmokeTest.ps1
 #>
 param(
     [string]$AppExe = (Join-Path $PSScriptRoot '..\..\src\Loop.App\bin\Debug\net8.0-windows\LoopForWindows.exe')
 )
 $ErrorActionPreference = 'Stop'
 if (-not (Test-Path $AppExe)) { throw "Build first: $AppExe not found (dotnet build)" }
+if (Get-Process LoopForWindows -ErrorAction SilentlyContinue) { throw "Quit the running Loop first (tray icon > Quit)." }
 
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class LoopSmoke {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L, T, R, B; }
   [StructLayout(LayoutKind.Sequential)] public struct MONITORINFO { public int cb; public RECT mon; public RECT work; public uint flags; }
   [StructLayout(LayoutKind.Sequential)] public struct KI { public ushort vk; public ushort scan; public uint flags; public uint time; public UIntPtr extra; }
   [StructLayout(LayoutKind.Explicit, Size=40)] public struct INPUT { [FieldOffset(0)] public uint type; [FieldOffset(8)] public KI ki; }
+  delegate bool MonEnum(IntPtr m, IntPtr dc, ref RECT r, IntPtr d);
   [DllImport("user32.dll")] static extern uint SendInput(uint n, INPUT[] i, int cb);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
   [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsZoomed(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+  [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr a, int x, int y, int cx, int cy, uint f);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr h, out RECT r);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c, string t);
   [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr h, uint f);
   [DllImport("user32.dll")] static extern bool GetMonitorInfo(IntPtr m, ref MONITORINFO mi);
+  [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonEnum cb, IntPtr d);
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr v);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr h, int a, out RECT r, int cb);
   public static void Key(int vk, bool up) {
     var i = new INPUT[1]; i[0].type = 1; i[0].ki.vk = (ushort)vk; i[0].ki.flags = up ? 2u : 0u;
     SendInput(1, i, Marshal.SizeOf(typeof(INPUT)));
   }
-  // Returns [left, top, width, height].
-  public static int[] Frame(IntPtr h) { RECT r; DwmGetWindowAttribute(h, 9, out r, 16); return new[] { r.L, r.T, r.R - r.L, r.B - r.T }; }
+  static int[] R(RECT r) { return new[] { r.L, r.T, r.R - r.L, r.B - r.T }; }
+  // Rects are [left, top, width, height] in physical pixels.
+  public static int[] Frame(IntPtr h) { RECT r; DwmGetWindowAttribute(h, 9, out r, 16); return R(r); }
+  public static int[] Outer(IntPtr h) { RECT r; GetWindowRect(h, out r); return R(r); }
   public static int[] Work(IntPtr h) {
     var mi = new MONITORINFO(); mi.cb = Marshal.SizeOf(typeof(MONITORINFO));
-    GetMonitorInfo(MonitorFromWindow(h, 2), ref mi);
-    return new[] { mi.work.L, mi.work.T, mi.work.R - mi.work.L, mi.work.B - mi.work.T };
+    GetMonitorInfo(MonitorFromWindow(h, 2), ref mi); return R(mi.work);
+  }
+  public static List<int[]> WorkAreas() {
+    var list = new List<int[]>();
+    EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, (IntPtr m, IntPtr dc, ref RECT r, IntPtr d) => {
+      var mi = new MONITORINFO(); mi.cb = Marshal.SizeOf(typeof(MONITORINFO)); GetMonitorInfo(m, ref mi);
+      list.Add(R(mi.work)); return true; }, IntPtr.Zero);
+    return list;
   }
 }
 '@
 [LoopSmoke]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null  # per-monitor v2: physical pixels
 
-$VK = @{ Left = 0x25; Up = 0x26; Right = 0x27; Down = 0x28; Enter = 0x0D; C = 0x43; M = 0x4D }
+$VK = @{ Left = 0x25; Up = 0x26; Right = 0x27; Down = 0x28; Enter = 0x0D; C = 0x43; M = 0x4D; Next = 0xDD; Prev = 0xDB; Esc = 0x1B }
 $title = "LoopSmokeTarget-$PID"
 $formScript = "Add-Type -AssemblyName System.Windows.Forms; `$f = New-Object Windows.Forms.Form; `$f.Text = '$title'; " +
               "`$f.StartPosition = 'Manual'; `$f.Left = 300; `$f.Top = 200; `$f.Width = 800; `$f.Height = 600; [Windows.Forms.Application]::Run(`$f)"
 $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($formScript))
-
-$target = Start-Process powershell -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) -PassThru
-$app = Start-Process $AppExe -PassThru
-$failures = 0
+$settingsFile = Join-Path ([IO.Path]::GetTempPath()) "loop-smoke-settings-$PID.json"
+$script:failures = 0
+$script:app = $null
 
 function Format-Rect([int[]]$r) { "({0},{1} {2}x{3})" -f $r[0], $r[1], $r[2], $r[3] }
+function Round-Half([double]$v) { [int][Math]::Round($v, [MidpointRounding]::AwayFromZero) }
+
+# Mirrors LayoutEngine: leading segment = round(len*f); trailing starts at round(len*(1-f)).
+function Lead([int]$start, [int]$len, [double]$f) { @($start, (Round-Half ($len * $f))) }
+function Trail([int]$start, [int]$len, [double]$f) { $o = Round-Half ($len * (1 - $f)); @(($start + $o), ($len - $o)) }
+
+function Expect-Layout([string]$action, [int[]]$work, [double]$f = 0.5, [int[]]$current = $null) {
+    $x, $y, $w, $hgt = $work
+    $l = Lead $x $w $f; $r = Trail $x $w $f; $t = Lead $y $hgt $f; $b = Trail $y $hgt $f
+    $ct = Lead $y $hgt 0.5; $cb = Trail $y $hgt 0.5
+    switch ($action) {
+        'Maximize'      { return @($x, $y, $w, $hgt) }
+        'LeftHalf'      { return @($l[0], $y, $l[1], $hgt) }
+        'RightHalf'     { return @($r[0], $y, $r[1], $hgt) }
+        'TopHalf'       { return @($x, $t[0], $w, $t[1]) }
+        'BottomHalf'    { return @($x, $b[0], $w, $b[1]) }
+        'TopLeft'       { return @($l[0], $ct[0], $l[1], $ct[1]) }
+        'TopRight'      { return @($r[0], $ct[0], $r[1], $ct[1]) }
+        'BottomLeft'    { return @($l[0], $cb[0], $l[1], $cb[1]) }
+        'BottomRight'   { return @($r[0], $cb[0], $r[1], $cb[1]) }
+        'Center'        { $cw = [Math]::Min($current[2], $w); $ch = [Math]::Min($current[3], $hgt)
+                          return @(($x + [Math]::Floor(($w - $cw) / 2)), ($y + [Math]::Floor(($hgt - $ch) / 2)), $cw, $ch) }
+        'CenterQuarter' { return @(($x + [Math]::Floor(($w - $l[1]) / 2)), ($y + [Math]::Floor(($hgt - $ct[1]) / 2)), $l[1], $ct[1]) }
+    }
+}
+
+# Mirrors LayoutEngine gaps: edges on the work-area border move in by the gap, inner edges by half.
+function With-Gap([int[]]$r, [int[]]$work, [int]$gap) {
+    $half = [Math]::Floor($gap / 2); $rest = $gap - $half
+    $left = if ($r[0] -eq $work[0]) { $r[0] + $gap } else { $r[0] + $rest }
+    $top = if ($r[1] -eq $work[1]) { $r[1] + $gap } else { $r[1] + $rest }
+    $right = if ($r[0] + $r[2] -eq $work[0] + $work[2]) { $r[0] + $r[2] - $gap } else { $r[0] + $r[2] - $half }
+    $bottom = if ($r[1] + $r[3] -eq $work[1] + $work[3]) { $r[1] + $r[3] - $gap } else { $r[1] + $r[3] - $half }
+    @($left, $top, ($right - $left), ($bottom - $top))
+}
+
+function Start-Loop([hashtable]$settings) {
+    Stop-Loop
+    ($settings | ConvertTo-Json -Depth 4) | Set-Content -Path $settingsFile -Encoding UTF8
+    $env:LOOP_SETTINGS = $settingsFile
+    $script:app = Start-Process $AppExe -PassThru
+    Remove-Item Env:LOOP_SETTINGS
+    Start-Sleep -Milliseconds 1500
+}
+
+function Stop-Loop {
+    if ($script:app) { Stop-Process -Id $script:app.Id -ErrorAction SilentlyContinue; $script:app.WaitForExit(); $script:app = $null }
+}
+
+$target = Start-Process powershell -ArgumentList @('-NoProfile', '-WindowStyle', 'Hidden', '-EncodedCommand', $encoded) -PassThru
 
 try {
     $h = [IntPtr]::Zero
@@ -66,86 +134,234 @@ try {
         $h = [LoopSmoke]::FindWindow([NullString]::Value, $title)
     }
     if ($h -eq [IntPtr]::Zero) { throw "Target window never appeared." }
-    Start-Sleep -Milliseconds 500
 
     function Focus-Target {
         # Synthesized input makes this process the last input owner, lifting the foreground lock.
-        [LoopSmoke]::Key(0xE8, $false); [LoopSmoke]::Key(0xE8, $true)
-        [LoopSmoke]::SetForegroundWindow($h) | Out-Null
-        Start-Sleep -Milliseconds 200
-        if ([LoopSmoke]::GetForegroundWindow() -ne $h) { throw "Could not focus the target window." }
+        for ($attempt = 0; $attempt -lt 5; $attempt++) {
+            [LoopSmoke]::Key(0xE8, $false); [LoopSmoke]::Key(0xE8, $true)
+            [LoopSmoke]::SetForegroundWindow($h) | Out-Null
+            Start-Sleep -Milliseconds 200
+            if ([LoopSmoke]::GetForegroundWindow() -eq $h) { return }
+        }
+        throw "Could not focus the target window."
     }
 
-    function Send-Chord([int[]]$keys) {
-        Focus-Target
-        foreach ($m in 0xA2, 0x5B, 0xA4) { [LoopSmoke]::Key($m, $false) }   # LCtrl, LWin, LAlt
-        foreach ($k in $keys) { [LoopSmoke]::Key($k, $false); Start-Sleep -Milliseconds 30 }
+    function Hold-Trigger { foreach ($m in 0xA2, 0x5B, 0xA4) { [LoopSmoke]::Key($m, $false) } }   # LCtrl, LWin, LAlt
+    function Release-Trigger { foreach ($m in 0xA4, 0x5B, 0xA2) { [LoopSmoke]::Key($m, $true) }; Start-Sleep -Milliseconds 350 }
+    function Tap([int[]]$keys) {
+        foreach ($k in $keys) { [LoopSmoke]::Key($k, $false); Start-Sleep -Milliseconds 15 }
+        Start-Sleep -Milliseconds 150   # longer than Loop's chord grace period
         foreach ($k in $keys) { [LoopSmoke]::Key($k, $true) }
-        foreach ($m in 0xA4, 0x5B, 0xA2) { [LoopSmoke]::Key($m, $true) }
-        Start-Sleep -Milliseconds 400
+        Start-Sleep -Milliseconds 100
     }
 
-    function Check([string]$name, [int[]]$expected) {
-        $actual = [LoopSmoke]::Frame($h)
-        if (($actual -join ',') -eq ($expected -join ',')) {
-            Write-Host ("PASS  {0,-22} {1}" -f $name, (Format-Rect $actual)) -ForegroundColor Green
+    # One full activation: hold the trigger, press the keys together, release everything.
+    function Send-Chord([int[]]$keys) { Focus-Target; Hold-Trigger; Tap $keys; Release-Trigger }
+
+    function Check([string]$name, [int[]]$expected, [int[]]$actual = $null, [int]$tolerance = 0) {
+        if ($null -eq $actual) { $actual = [LoopSmoke]::Frame($h) }
+        $ok = $true
+        for ($i = 0; $i -lt 4; $i++) { if ([Math]::Abs($actual[$i] - $expected[$i]) -gt $tolerance) { $ok = $false } }
+        if ($ok) {
+            Write-Host ("PASS  {0,-38} {1}" -f $name, (Format-Rect $actual)) -ForegroundColor Green
         } else {
-            Write-Host ("FAIL  {0,-22} expected {1}, got {2}" -f $name, (Format-Rect $expected), (Format-Rect $actual)) -ForegroundColor Red
+            Write-Host ("FAIL  {0,-38} expected {1}, got {2}" -f $name, (Format-Rect $expected), (Format-Rect $actual)) -ForegroundColor Red
             $script:failures++
         }
     }
 
+    function Check-True([string]$name, [bool]$ok, [string]$detail = '') {
+        if ($ok) { Write-Host ("PASS  {0,-38} {1}" -f $name, $detail) -ForegroundColor Green }
+        else { Write-Host ("FAIL  {0,-38} {1}" -f $name, $detail) -ForegroundColor Red; $script:failures++ }
+    }
+
+    function Get-Overlay { [LoopSmoke]::FindWindow([NullString]::Value, 'Loop preview') }
+    function Overlay-Visible { $o = Get-Overlay; ($o -ne [IntPtr]::Zero) -and [LoopSmoke]::IsWindowVisible($o) }
+    function Inset([int[]]$r) { @(($r[0] + 4), ($r[1] + 4), ($r[2] - 8), ($r[3] - 8)) }  # PreviewOverlay.Inset
+
+    # ============================ Preview mode (the default) =====================================
+    Start-Loop @{}
     $work = [LoopSmoke]::Work($h)
-    $ax, $ay, $aw, $ah = $work   # names differ from $h: PowerShell variables are case-insensitive
-    $hw = [int][Math]::Round($aw / 2, [MidpointRounding]::AwayFromZero)  # leading half (matches LayoutEngine)
-    $hh = [int][Math]::Round($ah / 2, [MidpointRounding]::AwayFromZero)
-    $rw = $aw - [int][Math]::Round($aw / 2, [MidpointRounding]::AwayFromZero)  # trailing half
-    $rh = $ah - [int][Math]::Round($ah / 2, [MidpointRounding]::AwayFromZero)
-    Write-Host "Work area $(Format-Rect $work)"
+    Write-Host "Work area $(Format-Rect $work)   [default settings: preview, apply on release]"
 
     $cases = @(
-        @{ Name = 'Left';        Keys = @($VK.Left);            Expect = @($ax, $ay, $hw, $ah) },
-        @{ Name = 'Right';       Keys = @($VK.Right);           Expect = @(($ax + $aw - $rw), $ay, $rw, $ah) },
-        @{ Name = 'Up';          Keys = @($VK.Up);              Expect = @($ax, $ay, $aw, $hh) },
-        @{ Name = 'Down';        Keys = @($VK.Down);            Expect = @($ax, ($ay + $ah - $rh), $aw, $rh) },
-        @{ Name = 'Up+Left';     Keys = @($VK.Up, $VK.Left);    Expect = @($ax, $ay, $hw, $hh) },
-        @{ Name = 'Up+Right';    Keys = @($VK.Up, $VK.Right);   Expect = @(($ax + $aw - $rw), $ay, $rw, $hh) },
-        @{ Name = 'Down+Left';   Keys = @($VK.Down, $VK.Left);  Expect = @($ax, ($ay + $ah - $rh), $hw, $rh) },
-        @{ Name = 'Down+Right';  Keys = @($VK.Down, $VK.Right); Expect = @(($ax + $aw - $rw), ($ay + $ah - $rh), $rw, $rh) },
-        @{ Name = 'Enter (maximize)'; Keys = @($VK.Enter);      Expect = @($ax, $ay, $aw, $ah) }
+        @{ Name = 'Left';        Keys = @($VK.Left);            Action = 'LeftHalf' },
+        @{ Name = 'Right';       Keys = @($VK.Right);           Action = 'RightHalf' },
+        @{ Name = 'Up';          Keys = @($VK.Up);              Action = 'TopHalf' },
+        @{ Name = 'Down';        Keys = @($VK.Down);            Action = 'BottomHalf' },
+        @{ Name = 'Up+Left';     Keys = @($VK.Up, $VK.Left);    Action = 'TopLeft' },
+        @{ Name = 'Up+Right';    Keys = @($VK.Up, $VK.Right);   Action = 'TopRight' },
+        @{ Name = 'Down+Left';   Keys = @($VK.Down, $VK.Left);  Action = 'BottomLeft' },
+        @{ Name = 'Down+Right';  Keys = @($VK.Down, $VK.Right); Action = 'BottomRight' }
     )
-    foreach ($c in $cases) { Send-Chord $c.Keys; Check $c.Name $c.Expect }
+    foreach ($c in $cases) { Send-Chord $c.Keys; Check $c.Name (Expect-Layout $c.Action $work) }
 
-    # Center keeps size: from the top-left quarter, centering keeps the quarter's size.
+    # ---- Enter = the window's own maximize/restore button ---------------------------------------
+    $before = [LoopSmoke]::Frame($h)
+    Send-Chord @($VK.Enter)
+    Check-True 'Enter: really maximized' ([LoopSmoke]::IsZoomed($h)) "frame $(Format-Rect ([LoopSmoke]::Frame($h)))"
+    Check-True 'Enter: on the same display' ((([LoopSmoke]::Work($h)) -join ',') -eq ($work -join ','))
+    Send-Chord @($VK.Enter)
+    Check-True 'Enter again: restored' (-not [LoopSmoke]::IsZoomed($h))
+    Check 'Enter again: back to previous size' $before
+    Send-Chord @($VK.Enter)
+    Send-Chord @($VK.Left, $VK.Right)
+    Check-True 'Left+Right on maximized: restored' (-not [LoopSmoke]::IsZoomed($h))
+    Check 'Left+Right on maximized: centered at old size' (Expect-Layout 'Center' $work 0.5 $before)
+
+    # ---- The preview itself --------------------------------------------------------------------
     Send-Chord @($VK.Up, $VK.Left)
-    $q = [LoopSmoke]::Frame($h)
-    Send-Chord @($VK.C)
-    Check 'C (center)' @(($ax + [int][Math]::Floor(($aw - $q[2]) / 2)), ($ay + [int][Math]::Floor(($ah - $q[3]) / 2)), $q[2], $q[3])
+    $before = [LoopSmoke]::Frame($h)
+    Focus-Target; Hold-Trigger; Tap @($VK.Right)
+    Start-Sleep -Milliseconds 150
+    Check 'holding: window stays put' $before
+    Check-True 'holding: preview visible' (Overlay-Visible)
+    if (Overlay-Visible) { Check 'holding: preview over target' (Inset (Expect-Layout 'RightHalf' $work)) ([LoopSmoke]::Outer((Get-Overlay))) }
+    Release-Trigger
+    Check 'release: window moves' (Expect-Layout 'RightHalf' $work)
+    Check-True 'release: preview hidden' (-not (Overlay-Visible))
 
-    # Full width / full height keep the other axis.
+    Focus-Target; Hold-Trigger; Tap @($VK.Left); Tap @($VK.Esc); Release-Trigger
+    Check 'Esc cancels' (Expect-Layout 'RightHalf' $work)
+    Check-True 'Esc hides preview' (-not (Overlay-Visible))
+
+    Focus-Target; Hold-Trigger; Tap @($VK.Left); Tap @($VK.Left); Tap @($VK.Left); Release-Trigger
+    Check 'Left x3 in one hold -> 2/3' (Expect-Layout 'LeftHalf' $work (2.0 / 3))
+    Focus-Target; Hold-Trigger; Tap @($VK.Left); Tap @($VK.Esc); Release-Trigger
+    Send-Chord @($VK.Left)
+    Check 'cycle continues after Esc -> 1/2' (Expect-Layout 'LeftHalf' $work)
+
+    # ---- Centering chords ----------------------------------------------------------------------
+    Send-Chord @($VK.Up, $VK.Left)
     $before = [LoopSmoke]::Frame($h)
     Send-Chord @($VK.Left, $VK.Right)
-    Check 'Left+Right (width)' @($ax, $before[1], $aw, $before[3])
-    Send-Chord @($VK.C)
+    Check 'Left+Right (center)' (Expect-Layout 'Center' $work 0.5 $before)
+    Send-Chord @($VK.Down, $VK.Left)
     $before = [LoopSmoke]::Frame($h)
     Send-Chord @($VK.Up, $VK.Down)
-    Check 'Up+Down (height)' @($before[0], $ay, $before[2], $ah)
+    Check 'Up+Down (center)' (Expect-Layout 'Center' $work 0.5 $before)
+    Send-Chord @($VK.Left, $VK.Right, $VK.Up, $VK.Down)
+    Check 'All four (corner size, centered)' (Expect-Layout 'CenterQuarter' $work)
+    Send-Chord @($VK.C)
+    Check 'C keeps size' (Expect-Layout 'CenterQuarter' $work)
 
-    # Without the trigger, arrows reach the app and Loop does nothing.
+    # ---- Cycling across activations -------------------------------------------------------------
+    foreach ($seq in @(@{ Keys = @($VK.Left); Action = 'LeftHalf'; Name = 'Left' },
+                       @{ Keys = @($VK.Down); Action = 'BottomHalf'; Name = 'Down' },
+                       @{ Keys = @($VK.Up, $VK.Right); Action = 'TopRight'; Name = 'Up+Right' },
+                       @{ Keys = @($VK.Left, $VK.Right, $VK.Up, $VK.Down); Action = 'CenterQuarter'; Name = 'All four' })) {
+        Send-Chord @($VK.Enter)
+        $i = 0
+        foreach ($f in @(0.5, (1.0 / 3), (2.0 / 3), 0.5)) {
+            Send-Chord $seq.Keys
+            $i++
+            Check ("{0} press {1} ({2:0.##})" -f $seq.Name, $i, $f) (Expect-Layout $seq.Action $work $f)
+        }
+    }
+
+    Send-Chord @($VK.Left); Send-Chord @($VK.Left)          # now at 1/3
+    [LoopSmoke]::SetWindowPos($h, [IntPtr]::Zero, 400, 300, 700, 500, 0x14) | Out-Null; Start-Sleep -Milliseconds 200
+    Send-Chord @($VK.Left)
+    Check 'Left after manual move -> 1/2' (Expect-Layout 'LeftHalf' $work)
+
     Focus-Target
     $before = [LoopSmoke]::Frame($h)
     [LoopSmoke]::Key($VK.Left, $false); [LoopSmoke]::Key($VK.Left, $true)
     Start-Sleep -Milliseconds 300
     Check 'bare Left (ignored)' $before
 
+    # ---- Displays --------------------------------------------------------------------------------
+    $areas = [LoopSmoke]::WorkAreas()
+    if ($areas.Count -lt 2) {
+        Write-Host "SKIP  display checks (only one monitor)" -ForegroundColor Yellow
+    } else {
+        $startWork = [LoopSmoke]::Work($h)
+
+        Send-Chord @($VK.Enter)
+        Send-Chord @($VK.Left)
+        Send-Chord @($VK.Next)
+        $destWork = [LoopSmoke]::Work($h)
+        Check-True ']' (($destWork -join ',') -ne ($startWork -join ',')) "moved to $(Format-Rect $destWork)"
+        Check '] keeps left half' (Expect-Layout 'LeftHalf' $destWork)
+        Send-Chord @($VK.Left)
+        Check 'Left cycles on new display -> 1/3' (Expect-Layout 'LeftHalf' $destWork (1.0 / 3))
+        Send-Chord @($VK.Prev)
+        Check '[ keeps 1/3 on the way back' (Expect-Layout 'LeftHalf' $startWork (1.0 / 3))
+
+        Focus-Target; Hold-Trigger; Tap @($VK.Next); Tap @($VK.Down, $VK.Right); Release-Trigger
+        Check '] then Down+Right in one hold' (Expect-Layout 'BottomRight' $destWork)
+        Send-Chord @($VK.Next)
+        Check '] wraps back, keeps corner' (Expect-Layout 'BottomRight' $startWork)
+
+        # A free-floating window keeps its relative position and size. DPI-unaware windows on a
+        # fractionally scaled display can be off by 1px (their size is stored in scaled units).
+        [LoopSmoke]::SetWindowPos($h, [IntPtr]::Zero, $startWork[0] + 300, $startWork[1] + 200, 800, 600, 0x14) | Out-Null
+        Start-Sleep -Milliseconds 200
+        $free = [LoopSmoke]::Frame($h)
+        Send-Chord @($VK.Next)
+        $sx = $destWork[2] / $startWork[2]; $sy = $destWork[3] / $startWork[3]
+        Check 'free window ] (proportional, +-1px)' @(
+            ($destWork[0] + (Round-Half (($free[0] - $startWork[0]) * $sx))),
+            ($destWork[1] + (Round-Half (($free[1] - $startWork[1]) * $sy))),
+            (Round-Half ($free[2] * $sx)), (Round-Half ($free[3] * $sy))) -tolerance 1
+        Send-Chord @($VK.Prev)
+        Check 'free window [ (round trip, +-1px)' $free -tolerance 1
+
+        [LoopSmoke]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 300
+        Send-Chord @($VK.Next)
+        Check-True 'maximized window ] stays maximized' ([LoopSmoke]::IsZoomed($h))
+        Check-True 'maximized window ] on next display' ((([LoopSmoke]::Work($h)) -join ',') -eq ($destWork -join ',')) "on $(Format-Rect ([LoopSmoke]::Work($h)))"
+        Send-Chord @($VK.Enter)
+        Check-True 'restore after move: stays on new display' ((-not [LoopSmoke]::IsZoomed($h)) -and
+            ((([LoopSmoke]::Work($h)) -join ',') -eq ($destWork -join ','))) "frame $(Format-Rect ([LoopSmoke]::Frame($h)))"
+        Send-Chord @($VK.Enter)
+
+        $sorted = $areas | Sort-Object { $_[0] }, { $_[1] }
+        for ($n = 1; $n -le $sorted.Count; $n++) {
+            Send-Chord @(0x30 + $n)
+            $now = [LoopSmoke]::Work($h)
+            Check-True "display key $n" (($now -join ',') -eq ($sorted[$n - 1] -join ',')) "on $(Format-Rect $now)"
+        }
+        Send-Chord @(0x30 + $sorted.Count + 1)
+        Check-True "display key $($sorted.Count + 1) (none)" ((([LoopSmoke]::Work($h)) -join ',') -eq ($sorted[-1] -join ',')) 'stayed'
+        Send-Chord @(0x30 + 1 + [array]::IndexOf(@($sorted | ForEach-Object { $_ -join ',' }), ($work -join ',')))  # back to start
+    }
+
     Send-Chord @($VK.M)
-    if ([LoopSmoke]::IsIconic($h)) { Write-Host 'PASS  M (minimize)' -ForegroundColor Green }
-    else { Write-Host 'FAIL  M (minimize): window is not minimized' -ForegroundColor Red; $failures++ }
+    Check-True 'M (minimize)' ([LoopSmoke]::IsIconic($h))
+    [LoopSmoke]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 300
+
+    # ============================ Instant mode + gaps (settings file) =============================
+    Start-Loop @{ ApplyMode = 'Instant'; Gap = 10 }
+    Write-Host "[settings: instant, gap 10]"
+    Focus-Target; Hold-Trigger; Tap @($VK.Left)
+    Check 'instant: moves while holding, with gap' (With-Gap (Expect-Layout 'LeftHalf' $work) $work 10)
+    Check-True 'instant: no preview' (-not (Overlay-Visible))
+    Release-Trigger
+    Send-Chord @($VK.Down, $VK.Right)
+    Check 'instant: corner with gap' (With-Gap (Expect-Layout 'BottomRight' $work) $work 10)
+
+    # ============================ Rebound key + excluded app ======================================
+    Start-Loop @{ ActionKeys = @{ Maximize = 'Space' } }
+    Write-Host "[settings: Maximize on Space]"
+    Send-Chord @($VK.Left)
+    Send-Chord @(0x20)
+    Check-True 'rebound: Space maximizes' ([LoopSmoke]::IsZoomed($h))
+    $before = [LoopSmoke]::Frame($h)
+    Send-Chord @($VK.Enter)
+    Check 'rebound: Enter no longer bound' $before
+
+    Start-Loop @{ ExcludedApps = @('PowerShell.exe') }
+    Write-Host "[settings: PowerShell excluded]"
+    $before = [LoopSmoke]::Frame($h)
+    Send-Chord @($VK.Left)
+    Check 'excluded app is not moved' $before
 }
 finally {
-    Stop-Process -Id $app.Id -ErrorAction SilentlyContinue
+    Stop-Loop
     Stop-Process -Id $target.Id -ErrorAction SilentlyContinue
+    Remove-Item $settingsFile -ErrorAction SilentlyContinue
 }
 
-if ($failures -gt 0) { Write-Host "$failures check(s) failed." -ForegroundColor Red; exit 1 }
+if ($script:failures -gt 0) { Write-Host "$($script:failures) check(s) failed." -ForegroundColor Red; exit 1 }
 Write-Host 'All smoke checks passed.' -ForegroundColor Green

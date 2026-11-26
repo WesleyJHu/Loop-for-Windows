@@ -2,8 +2,14 @@ namespace Loop.Core.Actions;
 
 /// <summary>
 /// Turns the set of held direction keys into a window action.
-/// Each axis is resolved independently:
-///   one key: that half;  both keys: the full span of that axis;  no key: unconstrained.
+///
+/// | Held                      | Action                              |
+/// |---------------------------|-------------------------------------|
+/// | one arrow                 | that half                           |
+/// | two perpendicular arrows  | that corner                         |
+/// | left + right, or up + down| center (keep size)                  |
+/// | three arrows              | the half named by the odd one out   |
+/// | all four                  | corner-sized window, centered       |
 /// </summary>
 public static class ActionResolver
 {
@@ -16,12 +22,11 @@ public static class ActionResolver
         {
             (Span.None, Span.None) => null,
 
-            // Opposite keys on one axis stretch that axis only.
-            (Span.Both, Span.None) => WindowAction.MaximizeWidth,
-            (Span.None, Span.Both) => WindowAction.MaximizeHeight,
-            (Span.Both, Span.Both) => WindowAction.Maximize,
+            // Opposite keys cancel out into "center".
+            (Span.Both, Span.None) or (Span.None, Span.Both) => WindowAction.Center,
+            (Span.Both, Span.Both) => WindowAction.CenterQuarter,
 
-            // Halves ("Both" on the other axis is the same as its full span).
+            // Halves. With three keys, the axis holding both is neutral and the odd key wins.
             (Span.First, Span.None or Span.Both) => WindowAction.LeftHalf,
             (Span.Second, Span.None or Span.Both) => WindowAction.RightHalf,
             (Span.None or Span.Both, Span.First) => WindowAction.TopHalf,

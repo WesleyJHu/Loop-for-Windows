@@ -11,6 +11,10 @@ public static class VirtualKeys
     public const int Down = 0x28;
     public const int C = 0x43;
     public const int M = 0x4D;
+    public const int D1 = 0x31; // top-row digits 1..9 are 0x31..0x39
+    public const int D9 = 0x39;
+    public const int OpenBracket = 0xDB;  // VK_OEM_4  '['
+    public const int CloseBracket = 0xDD; // VK_OEM_6  ']'
 
     public const int LWin = 0x5B;
     public const int RWin = 0x5C;

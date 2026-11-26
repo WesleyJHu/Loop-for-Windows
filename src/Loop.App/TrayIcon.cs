@@ -2,7 +2,6 @@ using System;
 using System.Drawing;
 using System.Windows.Forms;
 using Loop.Core.Input;
-using Loop.Platform;
 
 namespace Loop.App;
 
@@ -10,33 +9,51 @@ namespace Loop.App;
 internal sealed class TrayIcon : IDisposable
 {
     private readonly NotifyIcon _icon;
+    private readonly ToolStripMenuItem _header;
+    private readonly ToolStripMenuItem _enabled;
+    private ModifierKeys _trigger;
 
-    public TrayIcon(LoopService loop, ModifierKeys trigger, Action onQuit)
+    public TrayIcon(ModifierKeys trigger, Action<bool> onEnabledChanged, Action onSettings, Action onQuit)
     {
-        var triggerText = FormatTrigger(trigger);
+        _header = new ToolStripMenuItem { Enabled = false };
 
-        var header = new ToolStripMenuItem($"Loop — hold {triggerText}") { Enabled = false };
-
-        var enabled = new ToolStripMenuItem("Enabled") { Checked = loop.Enabled, CheckOnClick = true };
-        enabled.CheckedChanged += (_, _) =>
+        _enabled = new ToolStripMenuItem("Enabled") { Checked = true, CheckOnClick = true };
+        _enabled.CheckedChanged += (_, _) =>
         {
-            loop.Enabled = enabled.Checked;
-            _icon!.Text = loop.Enabled ? $"Loop ({triggerText})" : "Loop (disabled)";
+            onEnabledChanged(_enabled.Checked);
+            UpdateText();
         };
+
+        var settings = new ToolStripMenuItem("Settings…");
+        settings.Click += (_, _) => onSettings();
 
         var quit = new ToolStripMenuItem("Quit");
         quit.Click += (_, _) => onQuit();
 
         var menu = new ContextMenuStrip();
-        menu.Items.AddRange(new ToolStripItem[] { header, new ToolStripSeparator(), enabled, quit });
+        menu.Items.AddRange(new ToolStripItem[] { _header, new ToolStripSeparator(), _enabled, settings, quit });
 
-        _icon = new NotifyIcon
-        {
-            Icon = SystemIcons.Application,
-            Text = $"Loop ({triggerText})",
-            ContextMenuStrip = menu,
-            Visible = true,
-        };
+        _icon = new NotifyIcon { Icon = SystemIcons.Application, ContextMenuStrip = menu, Visible = true };
+        _icon.DoubleClick += (_, _) => onSettings();
+
+        SetTrigger(trigger);
+    }
+
+    public void SetTrigger(ModifierKeys trigger)
+    {
+        _trigger = trigger;
+        UpdateText();
+    }
+
+    public void ShowWarning(string message) =>
+        _icon.ShowBalloonTip(10_000, "Loop", message, ToolTipIcon.Warning);
+
+    private void UpdateText()
+    {
+        var trigger = KeyNames.Format(_trigger);
+        _header.Text = $"Loop — hold {trigger}";
+        var text = _enabled.Checked ? $"Loop ({trigger})" : "Loop (disabled)";
+        _icon.Text = text.Length > 63 ? text[..63] : text; // NotifyIcon.Text is limited to 63 chars
     }
 
     public void Dispose()
@@ -44,15 +61,5 @@ internal sealed class TrayIcon : IDisposable
         _icon.Visible = false;
         _icon.ContextMenuStrip?.Dispose();
         _icon.Dispose();
-    }
-
-    private static string FormatTrigger(ModifierKeys trigger)
-    {
-        var parts = new System.Collections.Generic.List<string>();
-        if (trigger.HasFlag(ModifierKeys.Ctrl)) parts.Add("Ctrl");
-        if (trigger.HasFlag(ModifierKeys.Win)) parts.Add("Win");
-        if (trigger.HasFlag(ModifierKeys.Alt)) parts.Add("Alt");
-        if (trigger.HasFlag(ModifierKeys.Shift)) parts.Add("Shift");
-        return string.Join("+", parts);
     }
 }

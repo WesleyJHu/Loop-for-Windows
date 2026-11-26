@@ -26,22 +26,21 @@ public class ActionResolverTests
         Assert.Equal(expected, ActionResolver.Resolve(held));
 
     [Fact]
-    public void LeftAndRight_GiveFullWidth() =>
-        Assert.Equal(WindowAction.MaximizeWidth, ActionResolver.Resolve(Left | Right));
+    public void LeftAndRight_Center() =>
+        Assert.Equal(WindowAction.Center, ActionResolver.Resolve(Left | Right));
 
     [Fact]
-    public void UpAndDown_GiveFullHeight() =>
-        Assert.Equal(WindowAction.MaximizeHeight, ActionResolver.Resolve(Up | Down));
+    public void UpAndDown_Center() =>
+        Assert.Equal(WindowAction.Center, ActionResolver.Resolve(Up | Down));
 
     [Fact]
-    public void AllFour_GiveMaximize() =>
-        Assert.Equal(WindowAction.Maximize, ActionResolver.Resolve(Left | Right | Up | Down));
+    public void AllFour_GiveCenteredCornerSize() =>
+        Assert.Equal(WindowAction.CenterQuarter, ActionResolver.Resolve(Left | Right | Up | Down));
 
     [Theory]
-    // Full width + one vertical direction = that vertical half (which already spans the width).
+    // With three keys, the axis holding both cancels out and the odd key names the half.
     [InlineData(Left | Right | Up, WindowAction.TopHalf)]
     [InlineData(Left | Right | Down, WindowAction.BottomHalf)]
-    // Full height + one horizontal direction = that horizontal half.
     [InlineData(Up | Down | Left, WindowAction.LeftHalf)]
     [InlineData(Up | Down | Right, WindowAction.RightHalf)]
     public void ThreeDirections_CollapseToHalf(Direction held, WindowAction expected) =>

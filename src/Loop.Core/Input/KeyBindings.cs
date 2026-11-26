@@ -24,18 +24,29 @@ public sealed class KeyBindings
         ActionKeys = actionKeys;
     }
 
-    public static KeyBindings Default { get; } = new(
-        new Dictionary<int, Direction>
-        {
-            [VirtualKeys.Left] = Direction.Left,
-            [VirtualKeys.Right] = Direction.Right,
-            [VirtualKeys.Up] = Direction.Up,
-            [VirtualKeys.Down] = Direction.Down,
-        },
-        new Dictionary<int, WindowAction>
+    public static KeyBindings Default { get; } = CreateDefault();
+
+    private static KeyBindings CreateDefault()
+    {
+        var actions = new Dictionary<int, WindowAction>
         {
             [VirtualKeys.Enter] = WindowAction.Maximize,
             [VirtualKeys.C] = WindowAction.Center,
             [VirtualKeys.M] = WindowAction.Minimize,
-        });
+            [VirtualKeys.CloseBracket] = WindowAction.NextDisplay,
+            [VirtualKeys.OpenBracket] = WindowAction.PreviousDisplay,
+        };
+        for (var vk = VirtualKeys.D1; vk <= VirtualKeys.D9; vk++)
+            actions[vk] = WindowAction.Display1 + (vk - VirtualKeys.D1);
+
+        return new KeyBindings(
+            new Dictionary<int, Direction>
+            {
+                [VirtualKeys.Left] = Direction.Left,
+                [VirtualKeys.Right] = Direction.Right,
+                [VirtualKeys.Up] = Direction.Up,
+                [VirtualKeys.Down] = Direction.Down,
+            },
+            actions);
+    }
 }

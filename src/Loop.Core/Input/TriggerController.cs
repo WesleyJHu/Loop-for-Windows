@@ -15,7 +15,15 @@ public readonly record struct KeyEvent(int VirtualKey, bool IsDown);
 /// when the gesture started. Otherwise Left then Right would apply "full width" to a window that
 /// Left already made full height.
 /// </param>
-public readonly record struct KeyDecision(bool Swallow, WindowAction? Action = null, bool SendMaskKey = false, bool NewGesture = false)
+/// <param name="IsChordKey">True when the action came from a direction key, so more chord keys may follow.</param>
+/// <param name="Cancel">True when Escape was pressed while the trigger is held: discard the pending preview.</param>
+public readonly record struct KeyDecision(
+    bool Swallow,
+    WindowAction? Action = null,
+    bool SendMaskKey = false,
+    bool NewGesture = false,
+    bool IsChordKey = false,
+    bool Cancel = false)
 {
     public static KeyDecision PassThrough => default;
 }
@@ -24,9 +32,10 @@ public readonly record struct KeyDecision(bool Swallow, WindowAction? Action = n
 /// The keyboard state machine. It is fed every key event from the low-level hook and decides
 /// whether to swallow it and which window action (if any) it triggers.
 ///
-/// Phase 1 semantics ("instant mode"): while exactly the trigger modifiers are held, every new
-/// press of a bound key applies immediately. Direction keys combine: the action is resolved
-/// from all direction keys currently held, so pressing Up while Left is held gives TopLeft.
+/// While exactly the trigger modifiers are held, every new press of a bound key produces an action.
+/// Direction keys combine: the action is resolved from all direction keys currently held, so
+/// pressing Up while Left is held gives TopLeft. Escape produces a cancel. Whether actions apply
+/// immediately or on trigger release is up to the caller (see ApplyMode).
 /// </summary>
 public sealed class TriggerController
 {
@@ -100,10 +109,21 @@ public sealed class TriggerController
 
         if (!IsTriggerActive) return KeyDecision.PassThrough;
 
+        var mask = (Trigger & (ModifierKeys.Win | ModifierKeys.Alt)) != 0;
+
+        if (vk == VirtualKeys.Escape)
+        {
+            _swallowed.Add(vk);
+            _heldDirections = Direction.None;
+            return new KeyDecision(Swallow: true, SendMaskKey: mask, Cancel: true);
+        }
+
         WindowAction? action;
         bool newGesture;
+        var isChordKey = false;
         if (Bindings.DirectionKeys.TryGetValue(vk, out var direction))
         {
+            isChordKey = true;
             newGesture = _heldDirections == Direction.None;
             _heldDirections |= direction;
             action = ActionResolver.Resolve(_heldDirections);
@@ -119,7 +139,6 @@ public sealed class TriggerController
         }
 
         _swallowed.Add(vk);
-        var mask = (Trigger & (ModifierKeys.Win | ModifierKeys.Alt)) != 0;
-        return new KeyDecision(Swallow: true, action, mask, newGesture);
+        return new KeyDecision(Swallow: true, action, mask, newGesture, isChordKey);
     }
 }

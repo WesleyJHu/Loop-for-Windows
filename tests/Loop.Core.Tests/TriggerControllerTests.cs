@@ -179,17 +179,53 @@ public class TriggerControllerTests
     }
 
     [Fact]
-    public void OppositeDirections_StretchAxis()
+    public void OppositeDirections_Center()
     {
         var c = NewController();
         HoldTrigger(c);
         Down(c, VK.Left);
-        Assert.Equal(WindowAction.MaximizeWidth, Down(c, VK.Right).Action);
+        Assert.Equal(WindowAction.Center, Down(c, VK.Right).Action);
 
         Up(c, VK.Left);
         Up(c, VK.Right);
         Down(c, VK.Up);
-        Assert.Equal(WindowAction.MaximizeHeight, Down(c, VK.Down).Action);
+        Assert.Equal(WindowAction.Center, Down(c, VK.Down).Action);
+    }
+
+    [Fact]
+    public void AllFourArrows_CenterQuarter()
+    {
+        var c = NewController();
+        HoldTrigger(c);
+        Down(c, VK.Left);
+        Down(c, VK.Right);
+        Down(c, VK.Up);
+        Assert.Equal(WindowAction.CenterQuarter, Down(c, VK.Down).Action);
+    }
+
+    [Theory]
+    [InlineData(VK.CloseBracket, WindowAction.NextDisplay)]
+    [InlineData(VK.OpenBracket, WindowAction.PreviousDisplay)]
+    [InlineData(VK.D1, WindowAction.Display1)]
+    [InlineData(0x35, WindowAction.Display5)]
+    [InlineData(VK.D9, WindowAction.Display9)]
+    public void DisplayKeys(int vk, WindowAction expected)
+    {
+        var c = NewController();
+        HoldTrigger(c);
+        var d = Down(c, vk);
+        Assert.Equal(expected, d.Action);
+        Assert.True(d.Swallow);
+    }
+
+    [Fact]
+    public void OnlyDirectionKeys_AreChordKeys()
+    {
+        var c = NewController();
+        HoldTrigger(c);
+        Assert.True(Down(c, VK.Left).IsChordKey);
+        Assert.False(Down(c, VK.Enter).IsChordKey);
+        Assert.False(Down(c, VK.CloseBracket).IsChordKey);
     }
 
     [Fact]
