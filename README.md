@@ -3,6 +3,15 @@
 Keyboard-driven window management for Windows, inspired by [Loop](https://github.com/MrKai77/Loop) for macOS.
 Hold a trigger key combo, press a direction, and let go: the focused window snaps into place.
 
+## Installing
+
+Download `LoopForWindows-Setup-<version>.exe` from the releases page and run it. It installs for your
+user only (no administrator rights needed) into `%LOCALAPPDATA%\Programs\Loop for Windows`, adds Start
+menu entries, and can start Loop when you sign in. Loop lives in the notification area; uninstall it from
+*Settings > Apps*. Your settings are kept, so reinstalling keeps your preferences.
+
+The installer bundles the .NET runtime, so nothing else needs to be installed (that's why it's ~65 MB).
+
 ## Usage
 
 Hold **Ctrl + Win + Alt** (the trigger; configurable) and press:
@@ -16,6 +25,7 @@ Hold **Ctrl + Win + Alt** (the trigger; configurable) and press:
 | Enter | Maximize / restore, exactly like the window's own maximize button |
 | C | Center (keeps current size) |
 | M | Minimize |
+| Backspace | Undo: back to where the window was before Loop first moved it |
 | ] / [ | Move to the next / previous display |
 | 1 – 9 | Move to display *n* (numbered left to right, then top to bottom) |
 | Esc | Cancel (while the trigger is held) |
@@ -49,6 +59,16 @@ first has to come out of maximized or minimized, between displays with different
 would rescale mid-flight), and for apps that repaint too slowly to keep up. Optionally, a ring at the
 cursor lights up the direction you've chosen, like macOS Loop's radial menu.
 
+**Undo.** Backspace returns a window to where it was before Loop first moved it, however many layouts
+you've tried since, including back to maximized if you had maximized it yourself. Once you move a
+window by hand, that becomes the place to return to.
+
+**Apps running as administrator.** Windows keeps normal apps from moving windows of apps that run as
+administrator, and from even seeing keys while one has focus. To manage those too, turn on *Run as
+administrator* in settings: Loop restarts and Windows asks for permission once. With *Start Loop when I
+sign in* also on, Loop then starts through Task Scheduler with administrator rights, without asking at
+every sign-in. Turning it off restarts Loop normally and removes the scheduled task.
+
 Without the trigger, every key behaves normally.
 
 ## Settings
@@ -62,7 +82,7 @@ Right-click the tray icon and choose **Settings…** (or double-click the icon).
   corner, display, and so on, not just the defaults above)
 - **animation**: window glides and preview animation on/off, duration, easing, and the direction indicator
 - **excluded apps**, by process name (e.g. `notepad`)
-- **start at sign-in** (per-user Run key; no admin rights)
+- **start at sign-in**, and **run as administrator**
 
 Changes apply as soon as you save. Settings live in `%APPDATA%\LoopForWindows\settings.json`. If that
 file is broken, Loop starts with the defaults and says why in a tray notification.
@@ -76,7 +96,13 @@ dotnet build
 dotnet test                              # unit tests (pure logic, no UI)
 dotnet run --project src/Loop.App        # start Loop (tray icon); add -- --settings to open settings
 .\tests\smoke\Invoke-SmokeTest.ps1       # end-to-end check against a real window (steals focus ~1 min)
+.\installer\build.ps1                    # tests, self-contained publish, installer -> artifacts\
 ```
+
+The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php) (`winget install JRSoftware.InnoSetup`).
+The version lives in `Directory.Build.props`. To release, set it, then push a matching tag (e.g. `v0.7.0`):
+the *Release* workflow builds the installer and attaches it to a draft GitHub release for you to publish.
+The app icon is drawn by `tools\New-LoopIcon.ps1`.
 
 Environment variables:
 - `LOOP_SETTINGS`: use a different settings file (the smoke test uses this so it never touches yours).
@@ -91,6 +117,8 @@ Environment variables:
 | `src/Loop.App` | WPF app: tray icon, preview overlay, direction indicator, settings window, single instance, Per-Monitor V2 DPI manifest. |
 | `tests/Loop.Core.Tests` | xUnit tests for everything in Core. |
 | `tests/smoke` | End-to-end smoke test using SendInput against a throwaway DPI-unaware window. |
+| `installer` | Inno Setup script and the build script that publishes Loop and makes the installer. |
+| `tools` | The icon generator. |
 
 **Threads.** The keyboard hook has a dedicated thread that only pumps messages and decides what each
 key means. Windows skips a low-level hook that doesn't answer quickly and passes the key through, so the
@@ -122,4 +150,5 @@ on common resolutions.
 - [x] **Phase 5**: settings UI (trigger, bindings, apply mode, preview, cycle sizes, gaps, exclusions, start at sign-in)
 - [x] **Phase 6**: smooth transitions and animations (window glides, preview fades and glides,
   direction indicator, animation settings; keyboard hook moved to its own thread)
-- [ ] **Phase 7**: elevated mode, restore previous size, installer
+- [x] **Phase 7**: run as administrator (with an elevated startup task), undo to the previous position,
+  app icon, installer, release workflow

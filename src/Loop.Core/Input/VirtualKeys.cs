@@ -3,6 +3,7 @@ namespace Loop.Core.Input;
 /// <summary>Win32 virtual-key codes used by Loop (kept here so Core stays platform-free).</summary>
 public static class VirtualKeys
 {
+    public const int Backspace = 0x08;
     public const int Enter = 0x0D;
     public const int Escape = 0x1B;
     public const int Left = 0x25;

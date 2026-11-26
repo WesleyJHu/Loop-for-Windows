@@ -157,6 +157,13 @@ public sealed class WindowManager
                 ok = true;
                 break;
 
+            case PlanKind.Maximize when CanMaximize(window) && planned.NormalBounds is { } normal:
+                // Undo to a maximized origin: give it its old restored bounds, then maximize there.
+                if (IsZoomed(window) || IsIconic(window)) ShowWindow(window, SW_RESTORE);
+                ok = Place(window, normal, planned.Display) is not null;
+                if (ok) ShowWindow(window, SW_MAXIMIZE); // returns the previous visibility, not success
+                break;
+
             case PlanKind.Maximize when CanMaximize(window):
                 ok = Maximize(window, planned.Display);
                 break;

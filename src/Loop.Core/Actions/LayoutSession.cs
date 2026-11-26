@@ -2,6 +2,9 @@ using Loop.Core.Geometry;
 
 namespace Loop.Core.Actions;
 
+/// <summary>A window's place before Loop moved it: its (restored) bounds, and whether it was maximized.</summary>
+public readonly record struct WindowOrigin(Rect Bounds, bool Maximized);
+
 /// <summary>Where to put a window, and what to remember about it once it lands.</summary>
 /// <param name="Target">The visible rect to place the window at.</param>
 /// <param name="Layout">The layout to record for cycling and display moves; null for a free-floating window.</param>
@@ -36,6 +39,20 @@ public sealed class LayoutSession
 
     public CycleTracker Cycles => _cycles;
     public int Gap { get; }
+
+    private readonly Dictionary<nint, WindowOrigin> _origins = new();
+
+    /// <summary>Where a window was before Loop first moved it, or null.</summary>
+    public WindowOrigin? OriginOf(nint window) => _origins.TryGetValue(window, out var o) ? o : null;
+
+    /// <summary>Remembers where a window was before Loop moved it (bounded, like the cycle state).</summary>
+    public void RememberOrigin(nint window, WindowOrigin origin)
+    {
+        if (_origins.Count >= 256 && !_origins.ContainsKey(window)) _origins.Clear();
+        _origins[window] = origin;
+    }
+
+    public void ForgetOrigin(nint window) => _origins.Remove(window);
 
     /// <param name="window">The window handle.</param>
     /// <param name="action">A layout action (<see cref="WindowActionExtensions.IsLayout"/>).</param>

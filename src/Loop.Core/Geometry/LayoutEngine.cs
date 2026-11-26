@@ -88,6 +88,18 @@ public static class LayoutEngine
         return new Rect(left, top, width, height);
     }
 
+    /// <summary>Keeps a rectangle's size (shrinking it only if it doesn't fit) and moves it inside <paramref name="area"/>.</summary>
+    public static Rect ClampInto(Rect r, Rect area)
+    {
+        if (area.IsEmpty) return r;
+        var width = Math.Clamp(r.Width, 1, area.Width);
+        var height = Math.Clamp(r.Height, 1, area.Height);
+        return new Rect(
+            Math.Clamp(r.Left, area.Left, area.Right - width),
+            Math.Clamp(r.Top, area.Top, area.Bottom - height),
+            width, height);
+    }
+
     /// <summary>The leading (left/top) segment covering <paramref name="fraction"/> of the axis.</summary>
     private static (int Position, int Size) Leading(int start, int length, double fraction) =>
         (start, Split(length, fraction));

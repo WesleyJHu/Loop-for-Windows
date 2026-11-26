@@ -72,7 +72,7 @@ public static class LoopSmoke {
 '@
 [LoopSmoke]::SetProcessDpiAwarenessContext([IntPtr]-4) | Out-Null  # per-monitor v2: physical pixels
 
-$VK = @{ Left = 0x25; Up = 0x26; Right = 0x27; Down = 0x28; Enter = 0x0D; C = 0x43; M = 0x4D; Next = 0xDD; Prev = 0xDB; Esc = 0x1B }
+$VK = @{ Left = 0x25; Up = 0x26; Right = 0x27; Down = 0x28; Enter = 0x0D; C = 0x43; M = 0x4D; Next = 0xDD; Prev = 0xDB; Esc = 0x1B; Back = 0x08 }
 $title = "LoopSmokeTarget-$PID"
 $formScript = "Add-Type -AssemblyName System.Windows.Forms; `$f = New-Object Windows.Forms.Form; `$f.Text = '$title'; " +
               "`$f.StartPosition = 'Manual'; `$f.Left = 300; `$f.Top = 200; `$f.Width = 800; `$f.Height = 600; [Windows.Forms.Application]::Run(`$f)"
@@ -285,6 +285,21 @@ try {
     [LoopSmoke]::Key($VK.Left, $false); [LoopSmoke]::Key($VK.Left, $true)
     Start-Sleep -Milliseconds 300
     Check 'bare Left (ignored)' $before
+
+    # ---- Restore previous (undo) ------------------------------------------------------------------
+    [LoopSmoke]::SetWindowPos($h, [IntPtr]::Zero, 300, 200, 800, 600, 0x14) | Out-Null; Start-Sleep -Milliseconds 200
+    $free = [LoopSmoke]::Frame($h)
+    Send-Chord @($VK.Left); Send-Chord @($VK.Up, $VK.Right); Send-Chord @($VK.Left)
+    Send-Chord @($VK.Back)
+    Check 'Backspace: back to where it was' $free
+    Send-Chord @($VK.Back)
+    Check 'Backspace again: nothing to undo' $free
+    [LoopSmoke]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 400   # maximized by the "user"
+    Send-Chord @($VK.Down)
+    Send-Chord @($VK.Back)
+    Check-True 'undo: maximized again' ([LoopSmoke]::IsZoomed($h))
+    [LoopSmoke]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 400
+    Check 'undo: restoring then gives the old size' $free
 
     # ---- Displays --------------------------------------------------------------------------------
     $areas = [LoopSmoke]::WorkAreas()

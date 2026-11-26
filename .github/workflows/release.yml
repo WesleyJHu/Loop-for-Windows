@@ -1,0 +1,38 @@
+name: Release
+
+# Push a tag like v0.7.0 to build the installer and attach it to a draft GitHub release.
+# Set <Version> in Directory.Build.props to match the tag first.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Check the tag matches the version
+        shell: pwsh
+        run: |
+          $version = (dotnet msbuild src/Loop.App/Loop.App.csproj -getProperty:Version).Trim()
+          if ("v$version" -ne "${{ github.ref_name }}") { throw "Tag ${{ github.ref_name }} doesn't match version $version in Directory.Build.props." }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      - name: Build installer
+        shell: pwsh
+        run: ./installer/build.ps1
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          files: artifacts/LoopForWindows-Setup-*.exe

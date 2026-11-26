@@ -4,5 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- The one place the version lives; the installer reads it from here. -->
+    <Version>0.7.0</Version>
   </PropertyGroup>
 </Project>

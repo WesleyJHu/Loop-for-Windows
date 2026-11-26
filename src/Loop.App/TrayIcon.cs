@@ -11,10 +11,12 @@ internal sealed class TrayIcon : IDisposable
     private readonly NotifyIcon _icon;
     private readonly ToolStripMenuItem _header;
     private readonly ToolStripMenuItem _enabled;
+    private readonly bool _elevated;
     private ModifierKeys _trigger;
 
-    public TrayIcon(ModifierKeys trigger, Action<bool> onEnabledChanged, Action onSettings, Action onQuit)
+    public TrayIcon(ModifierKeys trigger, bool elevated, Action<bool> onEnabledChanged, Action onSettings, Action onQuit)
     {
+        _elevated = elevated;
         _header = new ToolStripMenuItem { Enabled = false };
 
         _enabled = new ToolStripMenuItem("Enabled") { Checked = true, CheckOnClick = true };
@@ -33,10 +35,19 @@ internal sealed class TrayIcon : IDisposable
         var menu = new ContextMenuStrip();
         menu.Items.AddRange(new ToolStripItem[] { _header, new ToolStripSeparator(), _enabled, settings, quit });
 
-        _icon = new NotifyIcon { Icon = SystemIcons.Application, ContextMenuStrip = menu, Visible = true };
+        _icon = new NotifyIcon { Icon = LoadIcon(), ContextMenuStrip = menu, Visible = true };
         _icon.DoubleClick += (_, _) => onSettings();
 
         SetTrigger(trigger);
+    }
+
+    /// <summary>Loop's icon at the size the notification area uses.</summary>
+    private static Icon LoadIcon()
+    {
+        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/loop.ico"));
+        if (resource is null) return SystemIcons.Application;
+        using var stream = resource.Stream;
+        return new Icon(stream, SystemInformation.SmallIconSize);
     }
 
     public void SetTrigger(ModifierKeys trigger)
@@ -51,8 +62,9 @@ internal sealed class TrayIcon : IDisposable
     private void UpdateText()
     {
         var trigger = KeyNames.Format(_trigger);
-        _header.Text = $"Loop — hold {trigger}";
-        var text = _enabled.Checked ? $"Loop ({trigger})" : "Loop (disabled)";
+        var admin = _elevated ? " (administrator)" : "";
+        _header.Text = $"Loop — hold {trigger}{admin}";
+        var text = _enabled.Checked ? $"Loop ({trigger}){admin}" : "Loop (disabled)";
         _icon.Text = text.Length > 63 ? text[..63] : text; // NotifyIcon.Text is limited to 63 chars
     }
 
@@ -60,6 +72,7 @@ internal sealed class TrayIcon : IDisposable
     {
         _icon.Visible = false;
         _icon.ContextMenuStrip?.Dispose();
+        if (!ReferenceEquals(_icon.Icon, SystemIcons.Application)) _icon.Icon?.Dispose(); // never dispose the shared fallback
         _icon.Dispose();
     }
 }

@@ -67,6 +67,18 @@ public sealed class LoopSettings
 
     public const int MaxAnimationDurationMs = 1000;
 
+    /// <summary>
+    /// Run Loop with administrator rights, so it can move windows of apps that run as administrator
+    /// (Windows keeps normal apps from touching those, and even from seeing keys while they have focus).
+    /// </summary>
+    public bool RunAsAdministrator { get; set; }
+
+    /// <summary>
+    /// Start Loop when the user signs in. Null means "not chosen in Loop": whatever is registered
+    /// (e.g. by the installer) is left as it is.
+    /// </summary>
+    public bool? LaunchAtStartup { get; set; }
+
     /// <summary>The animation settings as options (call on validated settings).</summary>
     public AnimationOptions ToAnimationOptions() =>
         new(AnimatePreview, AnimateWindows, TimeSpan.FromMilliseconds(AnimationDurationMs), AnimationEasing);
@@ -80,6 +92,7 @@ public sealed class LoopSettings
             [WindowAction.Maximize] = "Enter",
             [WindowAction.Center] = "C",
             [WindowAction.Minimize] = "M",
+            [WindowAction.RestorePrevious] = "Backspace",
             [WindowAction.NextDisplay] = "]",
             [WindowAction.PreviousDisplay] = "[",
         };
@@ -104,6 +117,8 @@ public sealed class LoopSettings
         AnimationDurationMs = AnimationDurationMs,
         AnimationEasing = AnimationEasing,
         ShowIndicator = ShowIndicator,
+        RunAsAdministrator = RunAsAdministrator,
+        LaunchAtStartup = LaunchAtStartup,
     };
 
     /// <summary>Every problem with these settings, as user-facing messages. Empty when valid.</summary>

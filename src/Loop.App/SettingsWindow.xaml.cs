@@ -25,13 +25,14 @@ public partial class SettingsWindow : Window
     /// <summary>Raised with validated settings and the launch-at-startup choice when the user saves.</summary>
     public event Action<LoopSettings, bool>? Saved;
 
-    public SettingsWindow(LoopSettings settings, bool launchAtStartup)
+    public SettingsWindow(LoopSettings settings, bool launchAtStartup, bool elevated)
     {
         InitializeComponent();
         BindingList.ItemsSource = _rows;
         PreviewKeyDown += OnPreviewKeyDown;
         Load(settings);
         LaunchAtStartup.IsChecked = launchAtStartup;
+        ElevationState.Text = elevated ? "Loop is running as administrator now." : "Loop is running without administrator rights now.";
     }
 
     private void Load(LoopSettings s)
@@ -52,6 +53,7 @@ public partial class SettingsWindow : Window
         AnimateWindows.IsChecked = s.AnimateWindows;
         AnimatePreview.IsChecked = s.AnimatePreview;
         ShowIndicator.IsChecked = s.ShowIndicator;
+        RunAsAdministrator.IsChecked = s.RunAsAdministrator;
         AnimationDuration.Text = s.AnimationDurationMs.ToString(CultureInfo.InvariantCulture);
         AnimationEasing.ItemsSource = EasingChoices;
         AnimationEasing.DisplayMemberPath = nameof(EasingChoice.Label);
@@ -93,6 +95,7 @@ public partial class SettingsWindow : Window
         s.AnimateWindows = AnimateWindows.IsChecked == true;
         s.AnimatePreview = AnimatePreview.IsChecked == true;
         s.ShowIndicator = ShowIndicator.IsChecked == true;
+        s.RunAsAdministrator = RunAsAdministrator.IsChecked == true;
         s.AnimationEasing = (AnimationEasing.SelectedItem as EasingChoice)?.Kind ?? EasingKind.EaseOut;
         if (int.TryParse(AnimationDuration.Text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var duration))
             s.AnimationDurationMs = duration;
@@ -279,6 +282,7 @@ internal static class ActionLabels
         WindowAction.Center => "Center (keep size)",
         WindowAction.CenterQuarter => "Center (corner size)",
         WindowAction.Minimize => "Minimize",
+        WindowAction.RestorePrevious => "Previous size and position (undo)",
         WindowAction.NextDisplay => "Next display",
         WindowAction.PreviousDisplay => "Previous display",
         _ when action.DisplayIndex() is { } n => $"Display {n + 1}",

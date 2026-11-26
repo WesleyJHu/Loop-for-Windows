@@ -18,6 +18,12 @@ public enum PlanKind
 public readonly record struct PlannedAction(WindowAction Action, PlanKind Kind, Rect Target, DisplayArea Display, LayoutPlan Plan)
 {
     public bool Minimize => Kind == PlanKind.Minimize;
+
+    /// <summary>For a maximize: the restored bounds to give the window first (when undoing to a maximized origin).</summary>
+    public Rect? NormalBounds { get; init; }
+
+    /// <summary>Where the window was before this activation, to remember for "restore previous" once applied.</summary>
+    public WindowOrigin? RecordOrigin { get; init; }
 }
 
 /// <summary>
@@ -34,6 +40,10 @@ public readonly record struct PlannedAction(WindowAction Action, PlanKind Kind, 
 /// Maximize behaves like the window's maximize/restore button: it toggles Windows' maximized state.
 /// While (simulated) maximized, the window's restored bounds are tracked, so restoring, centering,
 /// or moving it to another display uses the size it had before it was maximized.
+///
+/// "Restore previous" undoes Loop: it returns the window to where it was before Loop first moved
+/// it. That origin is recorded when Loop moves a window that isn't in one of Loop's layouts (it
+/// was placed by the user or the app), and kept while the window stays in Loop's layouts.
 /// </summary>
 public sealed class GesturePlanner
 {
@@ -44,6 +54,8 @@ public sealed class GesturePlanner
     private bool _maximized;
     private Rect? _restored;
     private CycleTracker.Entry? _savedEntry;
+    private WindowOrigin? _originCandidate; // set when the window wasn't in a Loop layout at Begin
+    private bool _changed;                 // a step has (virtually) moved the window this activation
 
     public GesturePlanner(LayoutSession session) => _session = session;
 
@@ -69,6 +81,10 @@ public sealed class GesturePlanner
         _displays = displays;
         _display = Math.Max(0, DisplayOrder.IndexOf(displays, visible));
         _savedEntry = _session.Cycles.Peek(window);
+        _originCandidate = _session.Cycles.Current(window, visible) is null
+            ? new WindowOrigin(maximized && restored is { } r ? r : visible, maximized)
+            : null;
+        _changed = false;
         Pending = null;
         IsActive = true;
     }
@@ -83,6 +99,9 @@ public sealed class GesturePlanner
 
         if (action == WindowAction.Maximize)
             return _maximized ? PlanRestore(action) : PlanMaximize(action, _display);
+
+        if (action == WindowAction.RestorePrevious)
+            return PlanRestorePrevious(action);
 
         if (action.IsDisplayMove())
         {
@@ -104,6 +123,31 @@ public sealed class GesturePlanner
         return Moved(action, _session.PlanLayout(Window, action, newGesture, basis, _displays[_display].WorkArea));
     }
 
+    /// <summary>Back to where the window was before Loop first moved it.</summary>
+    private PlannedAction? PlanRestorePrevious(WindowAction action)
+    {
+        // A window that wasn't in a Loop layout when the trigger was pressed has nothing to undo,
+        // unless it was moved earlier in this same activation (then undo goes back to its start).
+        var origin = _originCandidate is { } candidate ? (_changed ? candidate : (WindowOrigin?)null) : _session.OriginOf(Window);
+        if (origin is not { } o) return Pending;
+
+        // Its display may be gone (unplugged): then bring it onto the nearest one.
+        var index = Math.Max(0, DisplayOrder.IndexOf(_displays, o.Bounds));
+        var display = _displays[index];
+        var bounds = display.Bounds.Intersect(o.Bounds).IsEmpty ? LayoutEngine.ClampInto(o.Bounds, display.WorkArea) : o.Bounds;
+
+        _session.EndGesture();
+        if (o.Maximized)
+        {
+            _maximized = false;
+            _visible = bounds;
+            return (Pending = PlanMaximize(action, index) with { NormalBounds = bounds }).Value;
+        }
+
+        _display = index;
+        return Moved(action, new LayoutPlan(bounds, null, 0));
+    }
+
     private PlannedAction Moved(WindowAction action, LayoutPlan plan)
     {
         // Simulate the window landing there, so the next step builds on this one.
@@ -111,12 +155,14 @@ public sealed class GesturePlanner
         _visible = plan.Target;
         _maximized = false;
         _restored = null;
+        _changed = true;
         return (Pending = new PlannedAction(action, PlanKind.Move, plan.Target, _displays[_display], plan)).Value;
     }
 
     private PlannedAction PlanMaximize(WindowAction action, int display)
     {
         _session.EndGesture();
+        _changed = true;
         if (!_maximized) _restored = _visible;
         _display = display;
         var work = _displays[display].WorkArea;
@@ -130,6 +176,7 @@ public sealed class GesturePlanner
     private PlannedAction PlanRestore(WindowAction action)
     {
         _session.EndGesture();
+        _changed = true;
         var target = _restored ?? _visible;
         _display = Math.Max(0, DisplayOrder.IndexOf(_displays, target));
         var plan = new LayoutPlan(target, null, 0); // a restored window is free-floating
@@ -143,7 +190,7 @@ public sealed class GesturePlanner
     /// <summary>Ends the activation and returns what to apply (null if nothing was planned).</summary>
     public PlannedAction? Finish()
     {
-        var result = Pending;
+        var result = Pending is { } p ? p with { RecordOrigin = _originCandidate } : (PlannedAction?)null;
         if (IsActive && result is null) _session.Cycles.Restore(Window, _savedEntry);
         Reset();
         return result;
@@ -161,8 +208,17 @@ public sealed class GesturePlanner
     /// <summary>After applying a finished plan, records where the window really landed.</summary>
     public void ReportLanded(nint window, PlannedAction applied, Rect landed)
     {
-        if (applied.Minimize) _session.Forget(window);
-        else _session.Landed(window, applied.Plan, landed);
+        if (applied.Minimize)
+        {
+            // Restored from the taskbar, the window comes back exactly where it was, so its layout
+            // (for cycling) and origin (for undo) stay valid.
+            _session.EndGesture();
+            return;
+        }
+
+        _session.Landed(window, applied.Plan, landed);
+        if (applied.Action == WindowAction.RestorePrevious) _session.ForgetOrigin(window); // undone
+        else if (applied.RecordOrigin is { } origin) _session.RememberOrigin(window, origin);
     }
 
     private void Reset()

@@ -11,10 +11,18 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\loop.ico</ApplicationIcon>
+    <Product>Loop for Windows</Product>
+    <Description>Keyboard-driven window management for Windows.</Description>
     <!-- WFAC010 targets WinForms apps; for WPF the manifest is the right place to declare
          Per-Monitor V2 DPI awareness (it must be set before any window is created). -->
     <NoWarn>$(NoWarn);WFAC010</NoWarn>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Regenerate with tools\New-LoopIcon.ps1. -->
+    <Resource Include="Assets\loop.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\Loop.Core\Loop.Core.csproj" />
