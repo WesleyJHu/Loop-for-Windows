@@ -101,7 +101,7 @@ public sealed class LoopSettings
             [WindowAction.Maximize] = "Enter",
             [WindowAction.Center] = "C",
             [WindowAction.Minimize] = "M",
-            [WindowAction.RestorePrevious] = "Backspace",
+            [WindowAction.Undo] = "Backspace",
             [WindowAction.NextDisplay] = "]",
             [WindowAction.PreviousDisplay] = "[",
         };

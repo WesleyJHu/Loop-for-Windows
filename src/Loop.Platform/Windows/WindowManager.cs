@@ -5,6 +5,7 @@ using Loop.Core.Actions;
 using Loop.Core.Animation;
 using Loop.Core.Geometry;
 using Loop.Core.Windows;
+using Loop.Platform.Input;
 using static Loop.Platform.Interop.NativeMethods;
 
 namespace Loop.Platform.Windows;
@@ -24,6 +25,7 @@ public sealed class WindowManager
     private readonly Func<bool> _systemAnimations;
     private readonly SynchronizationContext? _ui;
     private readonly WindowAnimator _animator = new();
+    private readonly UndoHistory _history = new();
     private Animating? _animating;
     private int _animationGeneration;
 
@@ -47,6 +49,9 @@ public sealed class WindowManager
 
     public bool IsPreviewing => _planner.IsActive;
 
+    /// <summary>Whether the preview has planned something to apply.</summary>
+    public bool HasPendingPreview => _planner.IsActive && _planner.Pending is not null;
+
     /// <summary>
     /// Plans <paramref name="action"/> without moving anything, starting a preview if none is active:
     /// for <paramref name="window"/>, or the foreground window when that is zero. Returns the pending
@@ -68,7 +73,53 @@ public sealed class WindowManager
         var window = _planner.Window;
         if (_planner.Finish() is not { } planned) return false;
         FinishAnimation();
-        return Apply(window, planned);
+        var before = Snapshot(window);
+        if (!Apply(window, planned)) return false;
+        if (before is { } b) _history.Push(new UndoEntry(window, planned.Action, b, planned.PreviousCycle, planned.PreviousOrigin));
+        return true;
+    }
+
+    /// <summary>
+    /// Takes back the last action Loop applied, to whichever window it was (a minimized window is
+    /// restored and brought back to the front). Ends any preview first. False if there was nothing to undo.
+    /// </summary>
+    public bool Undo()
+    {
+        _planner.Cancel();
+        FinishAnimation();
+        while (_history.TryPop(IsWindow, out var entry))
+        {
+            var window = (IntPtr)entry.Window;
+            var displays = MonitorService.GetDisplays();
+            if (displays.Count == 0) return false;
+
+            var wasMinimized = IsIconic(window);
+            var planned = UndoHistory.Plan(entry, displays, wasMinimized);
+            if (!Apply(window, planned)) continue; // it can't be moved any more: try the one before
+
+            if (wasMinimized && planned.Kind != PlanKind.Minimize)
+            {
+                InputInjector.SendMaskKey(); // lets Loop hand focus over (Windows only allows that right after input)
+                SetForegroundWindow(window);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>How the window is placed now, for undoing what is about to be done to it.</summary>
+    private WindowSnapshot? Snapshot(IntPtr window)
+    {
+        if (!IsWindow(window) || !TryMeasure(window, out _, out var visible)) return null;
+        var maximized = IsZoomed(window);
+        var minimized = IsIconic(window);
+        Rect? restored = null;
+        if (maximized || minimized)
+        {
+            var displays = MonitorService.GetDisplays();
+            if (displays.Count > 0) restored = GetRestoredBounds(window, displays, visible);
+        }
+        return new WindowSnapshot(visible, maximized, minimized, restored);
     }
 
     public void CancelPreview() => _planner.Cancel();

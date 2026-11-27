@@ -62,6 +62,22 @@ public static class SettingsStore
         settings.ActionKeys ??= defaults.ActionKeys;
         settings.ExcludedApps ??= defaults.ExcludedApps;
         settings.PreviewColor ??= defaults.PreviewColor;
+        MigrateUndoKey(settings.ActionKeys);
         return settings;
+    }
+
+    /// <summary>
+    /// Files from before Undo existed don't mention it. Give it its default key, Backspace: taken
+    /// over from "restore previous" (which had it by default), or only if nothing else uses it.
+    /// </summary>
+    private static void MigrateUndoKey(Dictionary<Actions.WindowAction, string> actionKeys)
+    {
+        if (actionKeys.ContainsKey(Actions.WindowAction.Undo)) return;
+        const string key = "Backspace";
+        if (actionKeys.TryGetValue(Actions.WindowAction.RestorePrevious, out var restore) &&
+            string.Equals(restore, key, StringComparison.OrdinalIgnoreCase))
+            actionKeys.Remove(Actions.WindowAction.RestorePrevious);
+        if (!actionKeys.Values.Any(v => string.Equals(v, key, StringComparison.OrdinalIgnoreCase)))
+            actionKeys[Actions.WindowAction.Undo] = key;
     }
 }

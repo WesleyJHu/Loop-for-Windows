@@ -24,6 +24,14 @@ public readonly record struct PlannedAction(WindowAction Action, PlanKind Kind, 
 
     /// <summary>Where the window was before this activation, to remember for "restore previous" once applied.</summary>
     public WindowOrigin? RecordOrigin { get; init; }
+
+    /// <summary>
+    /// The window's layout (for cycling) before this activation. For an undo: the layout to put back.
+    /// </summary>
+    public CycleTracker.Entry? PreviousCycle { get; init; }
+
+    /// <summary>The window's "restore previous" origin before this activation. For an undo: the origin to put back.</summary>
+    public WindowOrigin? PreviousOrigin { get; init; }
 }
 
 /// <summary>
@@ -102,6 +110,9 @@ public sealed class GesturePlanner
 
         if (action == WindowAction.RestorePrevious)
             return PlanRestorePrevious(action);
+
+        if (action == WindowAction.Undo)
+            return Pending; // undo works on Loop's history, not this window (see UndoHistory)
 
         if (action.IsDisplayMove())
         {
@@ -190,7 +201,9 @@ public sealed class GesturePlanner
     /// <summary>Ends the activation and returns what to apply (null if nothing was planned).</summary>
     public PlannedAction? Finish()
     {
-        var result = Pending is { } p ? p with { RecordOrigin = _originCandidate } : (PlannedAction?)null;
+        var result = Pending is { } p
+            ? p with { RecordOrigin = _originCandidate, PreviousCycle = _savedEntry, PreviousOrigin = _session.OriginOf(Window) }
+            : (PlannedAction?)null;
         if (IsActive && result is null) _session.Cycles.Restore(Window, _savedEntry);
         Reset();
         return result;
@@ -208,6 +221,16 @@ public sealed class GesturePlanner
     /// <summary>After applying a finished plan, records where the window really landed.</summary>
     public void ReportLanded(nint window, PlannedAction applied, Rect landed)
     {
+        if (applied.Action == WindowAction.Undo)
+        {
+            // Back where it was, so its layout and origin are what they were then.
+            _session.EndGesture();
+            _session.Cycles.Restore(window, applied.PreviousCycle);
+            if (applied.PreviousOrigin is { } previous) _session.RememberOrigin(window, previous);
+            else _session.ForgetOrigin(window);
+            return;
+        }
+
         if (applied.Minimize)
         {
             // Restored from the taskbar, the window comes back exactly where it was, so its layout

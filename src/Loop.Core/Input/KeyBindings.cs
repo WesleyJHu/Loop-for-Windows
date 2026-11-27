@@ -33,7 +33,7 @@ public sealed class KeyBindings
             [VirtualKeys.Enter] = WindowAction.Maximize,
             [VirtualKeys.C] = WindowAction.Center,
             [VirtualKeys.M] = WindowAction.Minimize,
-            [VirtualKeys.Backspace] = WindowAction.RestorePrevious,
+            [VirtualKeys.Backspace] = WindowAction.Undo,
             [VirtualKeys.CloseBracket] = WindowAction.NextDisplay,
             [VirtualKeys.OpenBracket] = WindowAction.PreviousDisplay,
         };

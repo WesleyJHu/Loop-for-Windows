@@ -25,7 +25,7 @@ Hold **Ctrl + Win + Alt** (the trigger; configurable) and press:
 | Enter | Maximize / restore, exactly like the window's own maximize button |
 | C | Center (keeps current size) |
 | M | Minimize |
-| Backspace | Undo: back to where the window was before Loop first moved it |
+| Backspace | Undo the last action (including a minimize); press again to go further back |
 | ] / [ | Move to the next / previous display |
 | 1 – 9 | Move to display *n* (numbered left to right, then top to bottom) |
 | Esc | Cancel (while the trigger is held) |
@@ -59,9 +59,16 @@ first has to come out of maximized or minimized, between displays with different
 would rescale mid-flight), and for apps that repaint too slowly to keep up. Optionally, a ring at the
 cursor lights up the direction you've chosen, like macOS Loop's radial menu.
 
-**Undo.** Backspace returns a window to where it was before Loop first moved it, however many layouts
-you've tried since, including back to maximized if you had maximized it yourself. Once you move a
-window by hand, that becomes the place to return to.
+**Undo.** Backspace takes back the last thing Loop did, to whichever window it did it to: a layout,
+a maximize or restore, a display move, or a minimize (the window comes back and gets focus again).
+Press it again to keep stepping back, up to 50 actions. It works right away, even in preview mode; if
+a preview is showing, Backspace discards that preview first. Size cycling picks up from where you
+undid to.
+
+**Back to where it was.** To jump a window straight back to where it was before Loop first moved
+it, however many layouts you've tried since, bind a key to *Back to where it was before Loop* in
+settings (it has no default key). That includes going back to maximized if you had maximized it
+yourself. Once you move a window by hand, that becomes the place to return to.
 
 **Apps running as administrator.** Windows keeps normal apps from moving windows of apps that run as
 administrator, and from even seeing keys while one has focus. To manage those too, turn on *Run as

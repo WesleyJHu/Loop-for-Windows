@@ -147,12 +147,12 @@ public class RestorePreviousTests
     }
 
     [Fact]
-    public void IsNotALayout_AndHasDefaultKey()
+    public void IsNotALayout_AndHasNoDefaultKey()
     {
         Assert.False(WindowAction.RestorePrevious.IsLayout());
         Assert.False(WindowAction.RestorePrevious.IsDisplayMove());
-        Assert.Equal(WindowAction.RestorePrevious, KeyBindings.Default.ActionKeys[VirtualKeys.Backspace]);
-        Assert.Equal("Backspace", LoopSettings.CreateDefault().ActionKeys[WindowAction.RestorePrevious]);
+        Assert.DoesNotContain(WindowAction.RestorePrevious, KeyBindings.Default.ActionKeys.Values);
+        Assert.False(LoopSettings.CreateDefault().ActionKeys.ContainsKey(WindowAction.RestorePrevious));
     }
 }
 

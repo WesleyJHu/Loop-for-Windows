@@ -110,7 +110,8 @@ public partial class SettingsWindow : Window
         else errors.Add("Animation duration must be a whole number of milliseconds.");
 
         s.DirectionKeys = _rows.Where(r => r.Direction is not null).ToDictionary(r => r.Direction!.Value, r => r.KeyName);
-        s.ActionKeys = _rows.Where(r => r.Action is not null && r.KeyName.Length > 0).ToDictionary(r => r.Action!.Value, r => r.KeyName);
+        // Unbound actions are saved as "" (not left out), so a later default key isn't given to them.
+        s.ActionKeys = _rows.Where(r => r.Action is not null).ToDictionary(r => r.Action!.Value, r => r.KeyName);
         s.ExcludedApps = ExcludedList.Items.Cast<string>().ToList();
 
         errors.AddRange(s.Validate());
@@ -309,7 +310,8 @@ internal static class ActionLabels
         WindowAction.Center => "Center (keep size)",
         WindowAction.CenterQuarter => "Center (corner size)",
         WindowAction.Minimize => "Minimize",
-        WindowAction.RestorePrevious => "Previous size and position (undo)",
+        WindowAction.RestorePrevious => "Back to where it was before Loop",
+        WindowAction.Undo => "Undo last action",
         WindowAction.NextDisplay => "Next display",
         WindowAction.PreviousDisplay => "Previous display",
         _ when action.DisplayIndex() is { } n => $"Display {n + 1}",

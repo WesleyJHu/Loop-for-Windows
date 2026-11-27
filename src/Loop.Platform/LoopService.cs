@@ -281,6 +281,20 @@ public sealed class LoopService : IDisposable
         Guard(p.Action.ToString(), () =>
         {
             var animate = AnimateVisuals;
+            if (p.Action == WindowAction.Undo)
+            {
+                // A preview not yet applied is the latest thing to take back; otherwise undo the
+                // last applied action right away (in either apply mode).
+                if (_windows.HasPendingPreview)
+                {
+                    _windows.CancelPreview();
+                    _overlay?.Hide(animate);
+                    _indicator?.Hide(animate);
+                }
+                else _windows.Undo();
+                return;
+            }
+
             if (_settings.ApplyMode == ApplyMode.Instant)
             {
                 if (_windows.ApplyNow(p.Action, p.NewGesture)) ShowIndicator(p.Action, animate);

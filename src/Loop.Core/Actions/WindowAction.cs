@@ -19,6 +19,8 @@ public enum WindowAction
     Minimize,
     /// <summary>Put the window back where it was before Loop first moved it (an undo).</summary>
     RestorePrevious,
+    /// <summary>Take back the last action Loop applied (to any window, including a minimize); repeat to go further back.</summary>
+    Undo,
 
     /// <summary>Move to the next display in left-to-right, top-to-bottom order (wraps around).</summary>
     NextDisplay,
@@ -39,7 +41,7 @@ public static class WindowActionExtensions
 {
     /// <summary>True when the action places the window inside its current monitor's work area.</summary>
     public static bool IsLayout(this WindowAction action) =>
-        action is not (WindowAction.Minimize or WindowAction.RestorePrevious) && !action.IsDisplayMove();
+        action is not (WindowAction.Minimize or WindowAction.RestorePrevious or WindowAction.Undo) && !action.IsDisplayMove();
 
     public static bool IsDisplayMove(this WindowAction action) =>
         action is >= WindowAction.NextDisplay and <= WindowAction.Display9;

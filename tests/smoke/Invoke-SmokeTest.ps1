@@ -299,14 +299,16 @@ try {
     Start-Sleep -Milliseconds 300
     Check 'bare Left (ignored)' $before
 
-    # ---- Restore previous (undo) ------------------------------------------------------------------
+    # ---- Undo ----------------------------------------------------------------------------------------
     [LoopSmoke]::SetWindowPos($h, [IntPtr]::Zero, 300, 200, 800, 600, 0x14) | Out-Null; Start-Sleep -Milliseconds 200
     $free = [LoopSmoke]::Frame($h)
     Send-Chord @($VK.Left); Send-Chord @($VK.Up, $VK.Right); Send-Chord @($VK.Left)
     Send-Chord @($VK.Back)
-    Check 'Backspace: back to where it was' $free
+    Check 'Backspace: undo Left -> top-right' (Expect-Layout 'TopRight' $work)
     Send-Chord @($VK.Back)
-    Check 'Backspace again: nothing to undo' $free
+    Check 'Backspace: undo top-right -> left' (Expect-Layout 'LeftHalf' $work)
+    Send-Chord @($VK.Back)
+    Check 'Backspace: undo left -> where it was' $free
     [LoopSmoke]::ShowWindow($h, 3) | Out-Null; Start-Sleep -Milliseconds 400   # maximized by the "user"
     Send-Chord @($VK.Down)
     Send-Chord @($VK.Back)
@@ -371,9 +373,14 @@ try {
         Send-Chord @(0x30 + 1 + [array]::IndexOf(@($sorted | ForEach-Object { $_ -join ',' }), ($work -join ',')))  # back to start
     }
 
+    $before = [LoopSmoke]::Frame($h)
     Send-Chord @($VK.M)
     Check-True 'M (minimize)' ([LoopSmoke]::IsIconic($h))
-    [LoopSmoke]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 300
+    Send-Chord @($VK.Back)
+    Start-Sleep -Milliseconds 300
+    Check-True 'Backspace: minimize undone' (-not [LoopSmoke]::IsIconic($h))
+    Check 'Backspace: back where it was' $before
+    if ([LoopSmoke]::IsIconic($h)) { [LoopSmoke]::ShowWindow($h, 9) | Out-Null; Start-Sleep -Milliseconds 300 }
 
     # ============================ Animation ======================================================
     Start-Loop @{}
