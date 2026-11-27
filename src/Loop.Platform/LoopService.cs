@@ -32,6 +32,7 @@ public sealed class LoopService : IDisposable
 
     private readonly IPreviewOverlay? _overlay;
     private readonly InputHook _hook;
+    private readonly MouseInjectionQueue _injection = new();
 
     /// <summary>The radius of the mouse menu's center, in DIPs (between the indicator's center dot and its ring).</summary>
     private const double MouseDeadZoneDips = 28;
@@ -46,6 +47,7 @@ public sealed class LoopService : IDisposable
     private readonly MouseMenuController _mouse;
     private bool _enabled = true;
     private bool _swallowEscapeUp;
+    private bool _menuWithTrigger;
 
     // UI thread only.
     private WindowManager _windows = null!;
@@ -65,7 +67,7 @@ public sealed class LoopService : IDisposable
         _overlay = overlay;
         _indicator = indicator;
         _hook = new InputHook(OnKey, OnMouse);
-        _mouse = new MouseMenuController(DeadZoneAt, Schedule, InputInjector.SendMouseButtons);
+        _mouse = new MouseMenuController(DeadZoneAt, Schedule, _injection.Enqueue);
         ApplySettings(settings);
     }
 
@@ -120,9 +122,10 @@ public sealed class LoopService : IDisposable
                 // still started with the first key.
                 merge: (pending, next) => next with { NewGesture = pending.NewGesture || next.NewGesture });
             if (_mouse.Configure(settings.MouseTrigger, TimeSpan.FromMilliseconds(settings.MouseDoubleClickMs))) Post(Cancel);
+            _menuWithTrigger = settings.MenuWithTrigger;
         }
         _mouseTarget = IntPtr.Zero;
-        _hook.MouseEnabled = settings.MouseTrigger != MouseTrigger.Off;
+        _hook.MouseEnabled = settings.MouseTrigger != MouseTrigger.Off || settings.MenuWithTrigger;
     }
 
     public void Start()
@@ -140,6 +143,7 @@ public sealed class LoopService : IDisposable
             _debouncer.Cancel();
             _mouse.Reset(); // lets a held-back middle click through
         }
+        _injection.Dispose(); // sends it
         _windows.FinishAnimation();
         _overlay?.Hide(animate: false);
         _indicator?.Hide(animate: false);
@@ -180,9 +184,32 @@ public sealed class LoopService : IDisposable
 
         if (decision.SendMaskKey) InputInjector.SendMaskKey();
 
-        // The keyboard trigger takes over from an open mouse menu (its release would otherwise
-        // commit the mouse's preview).
-        if (_controller.IsTriggerActive && _mouse.CancelMenu()) Post(Cancel);
+        if (_controller.IsTriggerActive && !wasActive)
+        {
+            // The keyboard trigger takes over from a menu the mouse opened (its release would
+            // otherwise commit the mouse's preview).
+            if (_mouse.CancelMenu()) Post(Cancel);
+
+            // Or opens the menu itself, so the mouse can choose while the trigger is held.
+            if (_menuWithTrigger && GetCursorPos(out var cursor))
+            {
+                var open = _mouse.OpenForKeyboard(cursor.X, cursor.Y);
+                Post(() => MouseOpen(open.X, open.Y, byKeyboard: true));
+                // Like a bound key, keep a lone Win/Alt release from opening Start or a menu bar.
+                if ((_controller.Trigger & (ModifierKeys.Win | ModifierKeys.Alt)) != 0) InputInjector.SendMaskKey();
+            }
+        }
+        else if (decision.Action is { } chosen && _mouse.IsOpenByKeyboard)
+        {
+            // A direction key chooses in the menu (the mouse can choose again by moving on);
+            // anything else (minimize, displays, undo) takes over from the menu.
+            if (Indicator.SegmentFor(chosen) is var segment && segment != IndicatorSegment.None) _mouse.KeyboardChose(segment);
+            else
+            {
+                _mouse.CancelMenu();
+                Post(Cancel);
+            }
+        }
 
         if (decision.Cancel)
         {
@@ -196,6 +223,7 @@ public sealed class LoopService : IDisposable
 
         if (wasActive && !_controller.IsTriggerActive)
         {
+            _mouse.CancelMenu(); // releasing the trigger applies what the menu is previewing (below)
             _debouncer.Flush(); // a chord still in its grace period belongs to this activation
             Post(Commit);
         }
@@ -211,7 +239,7 @@ public sealed class LoopService : IDisposable
             var d = _mouse.Process(e, canOpen: _enabled && !_controller.IsTriggerActive);
             switch (d.Effect)
             {
-                case MouseMenuEffect.Open: Post(() => MouseOpen(d.X, d.Y)); break;
+                case MouseMenuEffect.Open: Post(() => MouseOpen(d.X, d.Y, byKeyboard: false)); break;
                 case MouseMenuEffect.Select: Post(() => MouseSelect(d.Segment)); break;
                 case MouseMenuEffect.Cycle: Post(MouseCycle); break;
                 case MouseMenuEffect.Commit: Post(Commit); break;
@@ -221,7 +249,8 @@ public sealed class LoopService : IDisposable
         }
     }
 
-    private void MouseOpen(int x, int y) => Guard("open the mouse menu", () =>
+    /// <param name="byKeyboard">Opened by holding the keyboard trigger: it acts on the focused window, like the keys.</param>
+    private void MouseOpen(int x, int y, bool byKeyboard) => Guard("open the mouse menu", () =>
     {
         if (_windows.IsPreviewing)
         {
@@ -230,7 +259,7 @@ public sealed class LoopService : IDisposable
         }
 
         _mouseAction = null;
-        _mouseTarget = WindowManager.GetWindowAt(x, y);
+        _mouseTarget = byKeyboard ? WindowManager.GetTargetWindow() : WindowManager.GetWindowAt(x, y);
         if (_mouseTarget == IntPtr.Zero)
         {
             // Nothing Loop can move here (the desktop, the taskbar): don't show a menu that does nothing.
@@ -250,7 +279,8 @@ public sealed class LoopService : IDisposable
         _mouseAction = Indicator.ActionFor(segment);
         var animate = AnimateVisuals;
         _indicator?.Show(segment, animate);
-        if (_mouseAction is { } action) ShowPreview(_windows.Preview(action, newGesture: true, _mouseTarget), animate);
+        // The center keeps a maximized window maximized: releasing there shouldn't restore it.
+        if (_mouseAction is { } action) ShowPreview(_windows.Preview(action, newGesture: true, _mouseTarget, toggleMaximize: false), animate);
         else _overlay?.Hide(animate);
     });
 
@@ -281,6 +311,7 @@ public sealed class LoopService : IDisposable
         Guard(p.Action.ToString(), () =>
         {
             var animate = AnimateVisuals;
+            if (_mouseTarget != IntPtr.Zero) _mouseAction = p.Action; // the menu is open: scrolling now cycles this
             if (p.Action == WindowAction.Undo)
             {
                 // A preview not yet applied is the latest thing to take back; otherwise undo the
@@ -310,7 +341,8 @@ public sealed class LoopService : IDisposable
 
     private void ShowIndicator(WindowAction action, bool animate)
     {
-        if (_settings.ShowIndicator) _indicator?.Show(Indicator.SegmentFor(action), animate);
+        // The open menu always follows the keys, so it shows what releasing the trigger applies.
+        if (_settings.ShowIndicator || _mouseTarget != IntPtr.Zero) _indicator?.Show(Indicator.SegmentFor(action), animate);
     }
 
     private void Commit() => Guard("commit", () =>

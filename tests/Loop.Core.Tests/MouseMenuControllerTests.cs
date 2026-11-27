@@ -359,6 +359,133 @@ public class MouseMenuControllerTests
         Assert.False(Up(MouseButton.Middle).Swallow);
     }
 
+    [Fact]
+    public void Injected_events_seen_before_the_injector_returns_are_not_waited_for()
+    {
+        MouseMenuController menu = null!;
+        menu = new MouseMenuController(
+            (_, _) => DeadZone,
+            (_, callback) => { var token = new Token(); _timers.Add((callback, token)); return token; },
+            events =>
+            {
+                // The hook sees the replayed press while it is still being injected.
+                foreach (var (button, down) in events)
+                    menu.Process(new MouseEvent(down ? MouseEventKind.Down : MouseEventKind.Up, 0, 0, _now, button, Injected: true), true);
+                return true;
+            },
+            () => _now);
+        menu.Configure(MouseTrigger.MiddleDoubleClick, TimeSpan.FromMilliseconds(300));
+
+        menu.Process(new MouseEvent(MouseEventKind.Down, 100, 100, _now, MouseButton.Middle), true);
+        Elapse();
+
+        // The real release isn't held back waiting for a press the hook already saw.
+        Assert.False(menu.Process(new MouseEvent(MouseEventKind.Up, 100, 100, _now, MouseButton.Middle), true).Swallow);
+    }
+
+    // ---- Opened by the keyboard trigger -------------------------------------------------------------
+
+    [Fact]
+    public void The_keyboard_trigger_opens_the_menu_with_nothing_selected_until_the_cursor_leaves_the_center()
+    {
+        var open = _menu.OpenForKeyboard(100, 100);
+        Assert.Equal(MouseMenuEffect.Open, open.Effect);
+        Assert.True(_menu.IsOpenByKeyboard);
+
+        Assert.Equal(MouseMenuEffect.None, Move(105, 100).Effect); // still in the center
+        Assert.Equal(IndicatorSegment.None, _menu.Selected);
+
+        var select = Move(160, 100);
+        Assert.False(select.Swallow); // the cursor still moves
+        Assert.Equal(MouseMenuEffect.Select, select.Effect);
+        Assert.Equal(IndicatorSegment.Right, select.Segment);
+
+        Assert.Equal(IndicatorSegment.Center, Move(100, 100).Segment); // back to the center: maximize
+    }
+
+    [Fact]
+    public void A_left_click_applies_the_keyboard_menu_and_its_release_is_swallowed()
+    {
+        _menu.OpenForKeyboard(100, 100);
+        Move(40, 100);
+
+        var click = Down(MouseButton.Left, 40, 100);
+        Assert.True(click.Swallow);
+        Assert.Equal(MouseMenuEffect.Commit, click.Effect);
+        Assert.Equal(IndicatorSegment.Left, click.Segment);
+        Assert.False(_menu.IsOpen);
+        Assert.True(Up(MouseButton.Left, 40, 100).Swallow);
+    }
+
+    [Fact]
+    public void The_keyboard_menu_lets_a_held_back_middle_click_through()
+    {
+        Down(MouseButton.Middle);
+        Up(MouseButton.Middle);
+
+        _menu.OpenForKeyboard(100, 100);
+
+        Assert.Equal(new[] { (MouseButton.Middle, true), (MouseButton.Middle, false) }, _injected);
+        Assert.True(_menu.IsOpenByKeyboard);
+    }
+
+    [Fact]
+    public void A_key_overrides_the_mouse_until_the_cursor_moves_into_another_segment()
+    {
+        _menu.OpenForKeyboard(100, 100);
+        Move(160, 100); // the mouse chooses Right
+
+        Assert.True(_menu.KeyboardChose(IndicatorSegment.Left)); // then the Left arrow
+        Assert.Equal(IndicatorSegment.Left, _menu.Selected);
+
+        Assert.Equal(MouseMenuEffect.None, Move(170, 105).Effect); // still in Right: the key's choice stands
+        Assert.Equal(IndicatorSegment.Left, _menu.Selected);
+
+        var select = Move(100, 30); // into Top: the mouse takes over again
+        Assert.Equal(MouseMenuEffect.Select, select.Effect);
+        Assert.Equal(IndicatorSegment.Top, select.Segment);
+    }
+
+    [Fact]
+    public void A_key_pressed_before_the_mouse_moves_is_kept_until_the_cursor_leaves_the_center()
+    {
+        _menu.OpenForKeyboard(100, 100);
+        _menu.KeyboardChose(IndicatorSegment.Bottom);
+
+        Assert.Equal(MouseMenuEffect.None, Move(105, 104).Effect);
+        Assert.Equal(IndicatorSegment.Bottom, _menu.Selected);
+
+        Assert.Equal(IndicatorSegment.Right, Move(160, 100).Segment);
+    }
+
+    [Fact]
+    public void A_click_applies_what_a_key_chose()
+    {
+        _menu.OpenForKeyboard(100, 100);
+        _menu.KeyboardChose(IndicatorSegment.TopLeft);
+
+        var click = Down(MouseButton.Left);
+        Assert.Equal(MouseMenuEffect.Commit, click.Effect);
+        Assert.Equal(IndicatorSegment.TopLeft, click.Segment);
+    }
+
+    [Fact]
+    public void Keys_only_choose_in_a_menu_the_keyboard_opened()
+    {
+        Assert.False(_menu.KeyboardChose(IndicatorSegment.Left));
+        OpenWithDoubleClick();
+        Assert.False(_menu.KeyboardChose(IndicatorSegment.Left));
+        Assert.Equal(IndicatorSegment.None, _menu.Selected);
+    }
+
+    [Fact]
+    public void A_menu_the_mouse_opened_is_not_reported_as_opened_by_the_keyboard()
+    {
+        OpenWithDoubleClick();
+        Assert.True(_menu.IsOpen);
+        Assert.False(_menu.IsOpenByKeyboard);
+    }
+
     // ---- Geometry -----------------------------------------------------------------------------------
 
     [Theory]

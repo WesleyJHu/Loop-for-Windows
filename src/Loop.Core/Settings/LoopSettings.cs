@@ -65,13 +65,19 @@ public sealed class LoopSettings
     /// <summary>Show a radial direction indicator near the cursor while the trigger is held.</summary>
     public bool ShowIndicator { get; set; }
 
+    /// <summary>
+    /// Open the radial menu at the cursor whenever the keyboard trigger is held, so moving the mouse
+    /// toward a direction and releasing the trigger snaps the window under the cursor.
+    /// </summary>
+    public bool MenuWithTrigger { get; set; }
+
     public const int MaxAnimationDurationMs = 1000;
 
     /// <summary>What opens the radial menu with the mouse (off by default: a middle-click trigger delays every middle click).</summary>
     public MouseTrigger MouseTrigger { get; set; } = MouseTrigger.Off;
 
     /// <summary>For <see cref="MouseTrigger.MiddleDoubleClick"/>: how quickly the second press must follow the first.</summary>
-    public int MouseDoubleClickMs { get; set; } = 300;
+    public int MouseDoubleClickMs { get; set; } = 200;
 
     public const int MinMouseDoubleClickMs = 100;
     public const int MaxMouseDoubleClickMs = 1000;
@@ -126,6 +132,7 @@ public sealed class LoopSettings
         AnimationDurationMs = AnimationDurationMs,
         AnimationEasing = AnimationEasing,
         ShowIndicator = ShowIndicator,
+        MenuWithTrigger = MenuWithTrigger,
         MouseTrigger = MouseTrigger,
         MouseDoubleClickMs = MouseDoubleClickMs,
         RunAsAdministrator = RunAsAdministrator,

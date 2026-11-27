@@ -55,16 +55,17 @@ public sealed class WindowManager
     /// <summary>
     /// Plans <paramref name="action"/> without moving anything, starting a preview if none is active:
     /// for <paramref name="window"/>, or the foreground window when that is zero. Returns the pending
-    /// result, or null when there is no window to act on.
+    /// result, or null when there is no window to act on. <paramref name="toggleMaximize"/> as in
+    /// <see cref="GesturePlanner.Step"/>.
     /// </summary>
-    public PlannedAction? Preview(WindowAction action, bool newGesture, IntPtr window = default)
+    public PlannedAction? Preview(WindowAction action, bool newGesture, IntPtr window = default, bool toggleMaximize = true)
     {
         if (!_planner.IsActive)
         {
             FinishAnimation(); // measure the window where it is going, not mid-glide
             if (!TryBegin(window)) return null;
         }
-        return _planner.Step(action, newGesture);
+        return _planner.Step(action, newGesture, toggleMaximize);
     }
 
     /// <summary>Applies the pending preview. Returns false if there was nothing to apply.</summary>

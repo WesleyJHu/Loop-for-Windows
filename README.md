@@ -87,15 +87,21 @@ window, and a ring appears at the cursor:
 - **Drag:** keep the second press held, move toward a direction, and let go: the window under the
   cursor snaps to that half or corner. The preview shows where it will go before you let go.
 - **Click:** let go without moving and the menu stays open; move to a direction and click.
-- **The middle** maximizes (or restores a maximized window). While dragging, it counts only once you
+- **The middle** maximizes (a window that's already maximized stays that way). While dragging, it counts only once you
   have moved out and come back, so a quick double-click doesn't maximize.
 - **Scroll** to cycle the chosen layout's size (½ → ⅓ → ⅔), like pressing its arrow again.
 - **Right-click** or **Esc** cancels.
 
 Loop has to wait a moment after a middle click to see whether a second press follows, so a single
 middle click (opening a link in a new tab, closing a tab) reaches apps up to the double-click speed later
-(300 ms by default, adjustable). Middle-button drags (panning) start as soon as you move. If you'd rather
+(200 ms by default, adjustable). Middle-button drags (panning) start as soon as you move. If you'd rather
 not have that delay, open the menu with the back or forward side button instead: a single press opens it.
+
+To use the menu with the keyboard trigger too, turn on *Behavior > Show the radial menu while the trigger
+is held*. Then hold the trigger, move the mouse toward a direction, and let go of the trigger to snap the
+focused window (clicking applies it right away). The arrow keys still work while the menu is open, and you
+can switch back and forth: an arrow overrides what the mouse chose, and moving the mouse into another
+direction overrides the arrow. Whichever you used last is applied when you let go.
 
 ## Settings
 
@@ -103,6 +109,7 @@ Right-click the tray icon and choose **Settings…** (or double-click the icon).
 
 - the **trigger** modifiers (any combination of Ctrl, Win, Alt, Shift)
 - **preview and apply on release**, or **move instantly**; show or hide the preview, and its color
+- **show the radial menu while the trigger is held**, to choose a direction with the mouse
 - **cycle sizes** (e.g. `1/2, 1/3, 2/3`), the **gap** between windows, and the **chord window**
 - the key for **every action**: click it and press the new key (the window has an action for each half,
   corner, display, and so on, not just the defaults above)

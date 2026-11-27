@@ -136,6 +136,43 @@ public class GesturePlannerTests
     }
 
     [Fact]
+    public void Maximize_WithoutToggling_KeepsAMaximizedWindowMaximized()
+    {
+        // The radial menu's center on a window that's already maximized.
+        var p = NewPlanner();
+        p.Begin(Hwnd, Primary.WorkArea, maximized: true, Displays, restored: Floating);
+        var r = p.Step(WindowAction.Maximize, true, toggleMaximize: false)!.Value;
+
+        Assert.Equal(PlanKind.Maximize, r.Kind);
+        Assert.Equal(Primary.WorkArea, r.Target);
+        Assert.Equal(Primary, r.Display);
+    }
+
+    [Fact]
+    public void Maximize_WithoutToggling_StillMaximizesANormalWindow()
+    {
+        var p = NewPlanner();
+        p.Begin(Hwnd, Floating, false, Displays);
+        var r = p.Step(WindowAction.Maximize, true, toggleMaximize: false)!.Value;
+
+        Assert.Equal(PlanKind.Maximize, r.Kind);
+        Assert.Equal(Primary.WorkArea, r.Target);
+    }
+
+    [Fact]
+    public void Maximize_WithoutToggling_KeepsTheRestoredSizeForLater()
+    {
+        // Staying maximized mustn't forget the size to restore to.
+        var p = NewPlanner();
+        p.Begin(Hwnd, Primary.WorkArea, maximized: true, Displays, restored: Floating);
+        p.Step(WindowAction.Maximize, true, toggleMaximize: false);
+        var restored = p.Step(WindowAction.Maximize, true)!.Value;
+
+        Assert.Equal(PlanKind.Restore, restored.Kind);
+        Assert.Equal(Floating, restored.Target);
+    }
+
+    [Fact]
     public void Maximize_Twice_InOneHold_TogglesBack()
     {
         var p = NewPlanner();

@@ -45,6 +45,7 @@ public partial class SettingsWindow : Window
         ModeOnRelease.IsChecked = s.ApplyMode == ApplyMode.OnRelease;
         ModeInstant.IsChecked = s.ApplyMode == ApplyMode.Instant;
         ShowPreview.IsChecked = s.ShowPreview;
+        MenuWithTrigger.IsChecked = s.MenuWithTrigger;
         CycleSizes.Text = string.Join(", ", s.CycleSizes);
         Gap.Text = s.Gap.ToString(CultureInfo.InvariantCulture);
         ChordGrace.Text = s.ChordGraceMs.ToString(CultureInfo.InvariantCulture);
@@ -88,6 +89,7 @@ public partial class SettingsWindow : Window
 
         s.ApplyMode = ModeInstant.IsChecked == true ? ApplyMode.Instant : ApplyMode.OnRelease;
         s.ShowPreview = ShowPreview.IsChecked == true;
+        s.MenuWithTrigger = MenuWithTrigger.IsChecked == true;
         s.CycleSizes = CycleSizes.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
         s.PreviewColor = PreviewColor.Text.Trim();
 
@@ -231,6 +233,36 @@ public partial class SettingsWindow : Window
     private void OnRemoveExcluded(object sender, RoutedEventArgs e)
     {
         if (ExcludedList.SelectedItem is { } item) ExcludedList.Items.Remove(item);
+    }
+
+    /// <summary>
+    /// A list takes every wheel turn over it, even when it has nothing left to scroll, so the page
+    /// wouldn't scroll while the cursor is over it. Pass those turns on to the page.
+    /// </summary>
+    private void OnListMouseWheel(object sender, MouseWheelEventArgs e)
+    {
+        if (e.Handled || FindChild<ScrollViewer>((DependencyObject)sender) is not { } inner) return;
+        var atEnd = e.Delta > 0 ? inner.VerticalOffset <= 0 : inner.VerticalOffset >= inner.ScrollableHeight;
+        if (!atEnd) return;
+
+        e.Handled = true;
+        var parent = (UIElement)VisualTreeHelper.GetParent((DependencyObject)sender);
+        parent.RaiseEvent(new MouseWheelEventArgs(e.MouseDevice, e.Timestamp, e.Delta)
+        {
+            RoutedEvent = MouseWheelEvent,
+            Source = sender,
+        });
+    }
+
+    private static T? FindChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T found) return found;
+            if (FindChild<T>(child) is { } deeper) return deeper;
+        }
+        return null;
     }
 
     private void OnExcludedInputKeyDown(object sender, KeyEventArgs e)

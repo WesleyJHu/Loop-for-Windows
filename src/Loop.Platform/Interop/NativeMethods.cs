@@ -72,6 +72,10 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     public static extern short GetAsyncKeyState(int vKey);
 
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool GetCursorPos(out POINT lpPoint);
+
     // ---- Message loop (for the hook thread) -----------------------------------------------------
 
     public const uint WM_QUIT = 0x0012;

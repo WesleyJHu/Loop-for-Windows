@@ -45,7 +45,8 @@ public readonly record struct PlannedAction(WindowAction Action, PlanKind Kind, 
 ///
 /// In instant mode the caller does Begin, Step, Finish for every key press.
 ///
-/// Maximize behaves like the window's maximize/restore button: it toggles Windows' maximized state.
+/// Maximize behaves like the window's maximize/restore button: it toggles Windows' maximized state
+/// (unless the caller asks it not to, as the radial menu's center does: that always maximizes).
 /// While (simulated) maximized, the window's restored bounds are tracked, so restoring, centering,
 /// or moving it to another display uses the size it had before it was maximized.
 ///
@@ -98,7 +99,11 @@ public sealed class GesturePlanner
     }
 
     /// <summary>Plans one key press. Returns the new pending result (unchanged if the key does nothing).</summary>
-    public PlannedAction? Step(WindowAction action, bool newGesture)
+    /// <param name="toggleMaximize">
+    /// True for the maximize button's behavior: Maximize restores a maximized window. False keeps a
+    /// maximized window maximized (the radial menu's center: "make it fill the screen").
+    /// </param>
+    public PlannedAction? Step(WindowAction action, bool newGesture, bool toggleMaximize = true)
     {
         if (!IsActive) throw new InvalidOperationException("Call Begin first.");
 
@@ -106,7 +111,7 @@ public sealed class GesturePlanner
             return Pending = new PlannedAction(action, PlanKind.Minimize, _visible, _displays[_display], default);
 
         if (action == WindowAction.Maximize)
-            return _maximized ? PlanRestore(action) : PlanMaximize(action, _display);
+            return _maximized && toggleMaximize ? PlanRestore(action) : PlanMaximize(action, _display);
 
         if (action == WindowAction.RestorePrevious)
             return PlanRestorePrevious(action);

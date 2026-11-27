@@ -40,7 +40,7 @@ public static class Indicator
 
     /// <summary>
     /// What choosing a segment of the mouse's radial menu does: a direction gives that half or
-    /// corner, the center maximizes (or restores a maximized window). None for <see cref="IndicatorSegment.None"/>.
+    /// corner, the center maximizes (a maximized window stays maximized). None for <see cref="IndicatorSegment.None"/>.
     /// </summary>
     public static WindowAction? ActionFor(IndicatorSegment segment) => segment switch
     {

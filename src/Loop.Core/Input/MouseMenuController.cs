@@ -96,7 +96,7 @@ public sealed class MouseMenuController
     private readonly Func<uint> _clock;
 
     private MouseTrigger _trigger = MouseTrigger.Off;
-    private TimeSpan _doubleClick = TimeSpan.FromMilliseconds(300);
+    private TimeSpan _doubleClick = TimeSpan.FromMilliseconds(200);
 
     private readonly HashSet<MouseButton> _swallowUp = new();
     private readonly Dictionary<MouseButton, int> _inFlight = new();
@@ -113,6 +113,8 @@ public sealed class MouseMenuController
     // The open menu.
     private bool _holding;          // the opening press is still held
     private bool _leftCenter;       // the cursor has left the center since the menu opened
+    private bool _byKeyboard;       // opened by holding the keyboard trigger (its release applies)
+    private IndicatorSegment? _keyGuard; // after a key chose: the cursor's segment then, which doesn't override it
     private int _anchorX, _anchorY, _lastX, _lastY;
     private double _deadZone;
 
@@ -153,6 +155,36 @@ public sealed class MouseMenuController
     {
         if (!IsOpen) return false;
         Close();
+        return true;
+    }
+
+    /// <summary>True when the open menu was opened by the keyboard trigger.</summary>
+    public bool IsOpenByKeyboard => IsOpen && _byKeyboard;
+
+    /// <summary>
+    /// Opens the menu at (x, y) because the keyboard trigger is held: moving the cursor chooses
+    /// (nothing until it first leaves the center), and the caller applies the choice when the
+    /// trigger is released. A click applies it right away; another button cancels.
+    /// </summary>
+    public MouseDecision OpenForKeyboard(int x, int y)
+    {
+        if (_pending) Flush();
+        var decision = Open(x, y);
+        _holding = false;
+        _byKeyboard = true;
+        return decision;
+    }
+
+    /// <summary>
+    /// A key chose <paramref name="segment"/> while the keyboard trigger's menu is open. It stays
+    /// chosen until the cursor moves into a different segment than the one it is in now, so the
+    /// mouse and the keys can take turns. False when no keyboard-opened menu is open.
+    /// </summary>
+    public bool KeyboardChose(IndicatorSegment segment)
+    {
+        if (!IsOpenByKeyboard) return false;
+        Selected = segment;
+        _keyGuard = SegmentAt(_lastX - _anchorX, _lastY - _anchorY, _deadZone);
         return true;
     }
 
@@ -231,7 +263,7 @@ public sealed class MouseMenuController
         }
 
         _swallowUp.Add(e.Button);
-        return Open(e);
+        return Open(e.X, e.Y);
     }
 
     /// <summary>Handles an event while a first middle click is held back; null to handle it as idle.</summary>
@@ -249,7 +281,7 @@ public sealed class MouseMenuController
                     CancelTimer();
                     _pending = false;
                     _swallowUp.Add(MouseButton.Middle);
-                    return Open(e);
+                    return Open(e.X, e.Y);
                 }
                 Flush();
                 return null; // may be the first click of a new double click
@@ -272,7 +304,13 @@ public sealed class MouseMenuController
             {
                 (_lastX, _lastY) = (e.X, e.Y);
                 var segment = SegmentAt(e.X - _anchorX, e.Y - _anchorY, _deadZone);
-                if (_holding && !_leftCenter)
+                if (_keyGuard is { } guard)
+                {
+                    if (segment == guard) return MouseDecision.PassThrough; // the key's choice stands
+                    _keyGuard = null;
+                    _leftCenter = true;
+                }
+                if ((_holding || _byKeyboard) && !_leftCenter)
                 {
                     if (segment == IndicatorSegment.Center) return MouseDecision.PassThrough;
                     _leftCenter = true;
@@ -305,15 +343,17 @@ public sealed class MouseMenuController
         }
     }
 
-    private MouseDecision Open(MouseEvent e)
+    private MouseDecision Open(int x, int y)
     {
         IsOpen = true;
         _holding = true;
         _leftCenter = false;
-        (_anchorX, _anchorY, _lastX, _lastY) = (e.X, e.Y, e.X, e.Y);
-        _deadZone = _deadZoneAt(e.X, e.Y);
+        _byKeyboard = false;
+        _keyGuard = null;
+        (_anchorX, _anchorY, _lastX, _lastY) = (x, y, x, y);
+        _deadZone = _deadZoneAt(x, y);
         Selected = IndicatorSegment.None;
-        return new MouseDecision(true, MouseMenuEffect.Open, IndicatorSegment.None, e.X, e.Y);
+        return new MouseDecision(true, MouseMenuEffect.Open, IndicatorSegment.None, x, y);
     }
 
     private MouseDecision Select(IndicatorSegment segment, bool swallow)
@@ -334,6 +374,7 @@ public sealed class MouseMenuController
     {
         IsOpen = false;
         _holding = false;
+        _byKeyboard = false;
         Selected = IndicatorSegment.None;
     }
 
@@ -356,9 +397,14 @@ public sealed class MouseMenuController
 
     private void Inject((MouseButton Button, bool Down)[] events)
     {
-        if (!_inject(events)) return; // nothing was injected, so there's nothing to wait for
-        _lastInjected = _clock();
+        // Count them before injecting: the hook may see them before the injector returns.
         foreach (var (button, _) in events) _inFlight[button] = _inFlight.GetValueOrDefault(button) + 1;
+        _lastInjected = _clock();
+        if (_inject(events)) return;
+
+        // Nothing was injected, so there's nothing to wait for.
+        foreach (var (button, _) in events)
+            if (_inFlight.TryGetValue(button, out var n)) _inFlight[button] = Math.Max(0, n - 1);
     }
 
     private bool IsInFlight(MouseButton button, uint now)
